@@ -1,0 +1,638 @@
+from __future__ import annotations
+
+import csv
+import io
+import os
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List
+
+from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for, g, abort, send_from_directory
+
+
+def create_app() -> Flask:
+    app = Flask(__name__)
+    app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", "dev-secret")
+
+    # Data directories (default to project-local ./data for easy `flask run`)
+    default_data_dir = Path(__file__).parent / "data"
+    data_dir = Path(os.environ.get("AC_DATA_DIR", str(default_data_dir)))
+    data_dir.mkdir(parents=True, exist_ok=True)
+    uploads_dir = data_dir / "uploads"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    db_path = data_dir / "ac.db"
+    log_file = data_dir / "logs.csv"
+
+    if not log_file.exists():
+        with log_file.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["timestamp", "type", "event", "value"])  # header
+
+    def append_log(event_type: str, event: str, value: str = "") -> None:
+        with log_file.open("a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([datetime.utcnow().isoformat(), event_type, event, value])
+
+    # ---- SQLite helpers ----
+    def get_db() -> sqlite3.Connection:
+        if "db" not in g:
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            g.db = conn
+        return g.db  # type: ignore[return-value]
+
+    @app.teardown_appcontext
+    def close_db(exception: Exception | None):  # type: ignore[no-redef]
+        db = g.pop("db", None)
+        if db is not None:
+            db.close()
+
+    def init_db() -> None:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            cur = conn.cursor()
+            # events table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS events (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  ts TEXT NOT NULL,
+                  type TEXT NOT NULL,
+                  event TEXT NOT NULL,
+                  value TEXT
+                );
+                """
+            )
+            # reminders table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS reminders (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  text TEXT NOT NULL,
+                  interval_min INTEGER NOT NULL,
+                  active INTEGER NOT NULL DEFAULT 1,
+                  use_tts INTEGER NOT NULL DEFAULT 1,
+                  use_notif INTEGER NOT NULL DEFAULT 0,
+                  created_at TEXT NOT NULL
+                );
+                """
+            )
+            # feedback table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS feedback (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  mood INTEGER,
+                  text TEXT,
+                  created_at TEXT NOT NULL
+                );
+                """
+            )
+            # settings table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS settings (
+                  key TEXT PRIMARY KEY,
+                  value TEXT
+                );
+                """
+            )
+            # uploads table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS uploads (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  filename TEXT NOT NULL,
+                  original_name TEXT,
+                  mime TEXT,
+                  size INTEGER,
+                  created_at TEXT NOT NULL
+                );
+                """
+            )
+            # profiles table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS profiles (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT NOT NULL,
+                  mode TEXT NOT NULL,
+                  theme TEXT,
+                  mood TEXT,
+                  font_scale REAL,
+                  is_active INTEGER NOT NULL DEFAULT 0,
+                  created_at TEXT NOT NULL
+                );
+                """
+            )
+            conn.commit()
+            # Create default profile if none exists
+            count = cur.execute("SELECT COUNT(*) FROM profiles").fetchone()[0]
+            if count == 0:
+                cur.execute(
+                    "INSERT INTO profiles(name, mode, theme, mood, font_scale, is_active, created_at) VALUES(?,?,?,?,?,?,?)",
+                    ("Default", "study", "pastel", "focus", 1.0, 1, datetime.utcnow().isoformat()),
+                )
+                conn.commit()
+        finally:
+            conn.close()
+
+    # Initialize database schema on startup
+    init_db()
+
+    @app.route("/")
+    def index() -> str:
+        return render_template("index.html")
+
+    @app.route("/sounds")
+    def sounds() -> str:
+        return render_template("sounds.html")
+
+    @app.route("/timers")
+    def timers() -> str:
+        return render_template("timers.html")
+
+    @app.route("/reminders")
+    def reminders() -> str:
+        return render_template("reminders.html")
+
+    @app.route("/stats")
+    def stats() -> str:
+        return render_template("stats.html")
+
+    @app.route("/settings")
+    def settings() -> str:
+        return render_template("settings.html")
+
+    # Simple APIs for logging and exporting
+    @app.post("/api/log")
+    def api_log():  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        event_type = str(payload.get("type", "info"))
+        event = str(payload.get("event", ""))
+        value = str(payload.get("value", ""))
+        append_log(event_type, event, value)
+        return jsonify({"ok": True})
+
+    @app.get("/api/stats")
+    def api_stats():  # type: ignore[no-redef]
+        # Aggregation from SQLite events
+        rng = request.args.get("range", "today")
+        db = get_db()
+        if rng == "7d":
+            since = (datetime.utcnow().timestamp() - 7 * 24 * 3600)
+        else:
+            # start of today UTC
+            now = datetime.utcnow()
+            since = datetime(now.year, now.month, now.day).timestamp()
+
+        rows = db.execute("SELECT type, event, value, ts FROM events").fetchall()
+        totals: Dict[str, int] = {}
+        focus_minutes = 0
+        focus_sessions = 0
+        pomodoro_count = 0
+        reminder_count = 0
+        sound_count = 0
+        hydration_count = 0
+        break_count = 0
+        
+        import time
+        for r in rows:
+            try:
+                t = datetime.fromisoformat(r["ts"])  # type: ignore[index]
+                if t.timestamp() < since:
+                    continue
+            except Exception:
+                continue
+            et = r["type"]; ev = r["event"]; val = r["value"]
+            if et:
+                totals[et] = totals.get(et, 0) + 1
+            if ev == "focus_minutes" and val:
+                try:
+                    focus_minutes += int(float(val))
+                except Exception:
+                    pass
+            if ev == "pomodoro_count" and val:
+                try:
+                    pomodoro_count += int(float(val))
+                except Exception:
+                    pass
+            if et == "timer" and (ev == "pomodoro_start" or ev == "stopwatch_start" or ev == "start"):
+                focus_sessions += 1
+            if et == "timer" and ev == "pomodoro_complete":
+                # Don't double count if already counted via pomodoro_count
+                pass
+            if et == "reminder":
+                reminder_count += 1
+                # Check for hydration reminders
+                if val and "hydrat" in val.lower():
+                    hydration_count += 1
+                # Check for break reminders
+                if val and ("break" in val.lower() or "stretch" in val.lower() or "stand" in val.lower()):
+                    break_count += 1
+            if et == "sound" and ev == "play":
+                sound_count += 1
+        
+        # Calculate wellness score (0-100)
+        wellness_score = 0
+        if focus_sessions > 0:
+            wellness_score += min(30, focus_sessions * 10)
+        if hydration_count > 0:
+            wellness_score += min(25, hydration_count * 5)
+        if break_count > 0:
+            wellness_score += min(25, break_count * 5)
+        if focus_minutes >= 25:
+            wellness_score += min(20, (focus_minutes // 25) * 10)
+        
+        return jsonify({
+            "totals": totals,
+            "focus_minutes": focus_minutes,
+            "focus_sessions": focus_sessions,
+            "pomodoro_count": pomodoro_count,
+            "reminder_count": reminder_count,
+            "sound_count": sound_count,
+            "hydration_count": hydration_count,
+            "break_count": break_count,
+            "wellness_score": min(100, wellness_score)
+        })
+
+    @app.get("/export.csv")
+    def export_csv():  # type: ignore[no-redef]
+        with log_file.open("r") as f:
+            csv_bytes = f.read().encode("utf-8")
+        buf = io.BytesIO(csv_bytes)
+        buf.seek(0)
+        return send_file(buf, mimetype="text/csv", as_attachment=True, download_name="ambient_logs.csv")
+
+    @app.get("/export_daily.csv")
+    def export_daily_csv():  # type: ignore[no-redef]
+        # Export last 24h from SQLite events
+        db = get_db()
+        cutoff = datetime.utcnow().timestamp() - 24 * 3600
+        output = io.StringIO()
+        w = csv.writer(output)
+        w.writerow(["timestamp", "type", "event", "value"])  # header
+        rows = db.execute("SELECT ts, type, event, value FROM events").fetchall()
+        for r in rows:
+            try:
+                t = datetime.fromisoformat(r["ts"])  # type: ignore[index]
+                if t.timestamp() < cutoff:
+                    continue
+            except Exception:
+                continue
+            w.writerow([r["ts"], r["type"], r["event"], r["value"]])
+        data = output.getvalue().encode("utf-8")
+        buf = io.BytesIO(data); buf.seek(0)
+        return send_file(buf, mimetype="text/csv", as_attachment=True, download_name="daily_events.csv")
+
+    @app.get("/export_summary.csv")
+    def export_summary_csv():  # type: ignore[no-redef]
+        # Export daily summary with calculated stats
+        db = get_db()
+        now = datetime.utcnow()
+        since = datetime(now.year, now.month, now.day).timestamp()
+        
+        rows = db.execute("SELECT type, event, value, ts FROM events").fetchall()
+        focus_minutes = 0
+        focus_sessions = 0
+        pomodoro_count = 0
+        reminder_count = 0
+        sound_count = 0
+        hydration_count = 0
+        break_count = 0
+        
+        for r in rows:
+            try:
+                t = datetime.fromisoformat(r["ts"])  # type: ignore[index]
+                if t.timestamp() < since:
+                    continue
+            except Exception:
+                continue
+            et = r["type"]; ev = r["event"]; val = r["value"]
+            if ev == "focus_minutes" and val:
+                try:
+                    focus_minutes += int(float(val))
+                except Exception:
+                    pass
+            if ev == "pomodoro_count" and val:
+                try:
+                    pomodoro_count += int(float(val))
+                except Exception:
+                    pass
+            if et == "timer" and (ev == "pomodoro_start" or ev == "stopwatch_start" or ev == "start"):
+                focus_sessions += 1
+            if et == "reminder":
+                reminder_count += 1
+                if val and "hydrat" in val.lower():
+                    hydration_count += 1
+                if val and ("break" in val.lower() or "stretch" in val.lower() or "stand" in val.lower()):
+                    break_count += 1
+            if et == "sound" and ev == "play":
+                sound_count += 1
+        
+        wellness_score = 0
+        if focus_sessions > 0:
+            wellness_score += min(30, focus_sessions * 10)
+        if hydration_count > 0:
+            wellness_score += min(25, hydration_count * 5)
+        if break_count > 0:
+            wellness_score += min(25, break_count * 5)
+        if focus_minutes >= 25:
+            wellness_score += min(20, (focus_minutes // 25) * 10)
+        
+        output = io.StringIO()
+        w = csv.writer(output)
+        w.writerow(["Date", "Pomodoros", "Focus Sessions", "Focus Minutes", "Reminders", "Sounds", "Hydration", "Breaks", "Wellness Score"])
+        w.writerow([now.strftime("%Y-%m-%d"), pomodoro_count, focus_sessions, focus_minutes, reminder_count, sound_count, hydration_count, break_count, min(100, wellness_score)])
+        
+        data = output.getvalue().encode("utf-8")
+        buf = io.BytesIO(data); buf.seek(0)
+        return send_file(buf, mimetype="text/csv", as_attachment=True, download_name="daily_summary.csv")
+
+
+    # ---- Uploads ----
+    ALLOWED_MIME = {"audio/mpeg", "audio/wav", "audio/x-wav", "audio/ogg", "audio/webm"}
+    MAX_SIZE = 15 * 1024 * 1024  # 15MB
+
+    @app.post("/api/upload")
+    def upload_audio():  # type: ignore[no-redef]
+        if "audio" not in request.files:
+            return jsonify({"ok": False, "error": "No file"}), 400
+        f = request.files["audio"]
+        if not f.filename:
+            return jsonify({"ok": False, "error": "No filename"}), 400
+        mime = f.mimetype or ""
+        if mime not in ALLOWED_MIME:
+            return jsonify({"ok": False, "error": "Unsupported type"}), 400
+        # enforce size
+        f.stream.seek(0, os.SEEK_END)
+        size = f.stream.tell()
+        f.stream.seek(0)
+        if size > MAX_SIZE:
+            return jsonify({"ok": False, "error": "File too large"}), 400
+
+        # safe random filename
+        ext = os.path.splitext(f.filename)[1].lower()[:10]
+        name = f"aud_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{os.urandom(4).hex()}{ext}"
+        save_path = uploads_dir / name
+        f.save(save_path)
+
+        db = get_db()
+        db.execute(
+            "INSERT INTO uploads(filename, original_name, mime, size, created_at) VALUES(?,?,?,?,?)",
+            (name, f.filename, mime, size, datetime.utcnow().isoformat()),
+        )
+        db.commit()
+        url = url_for("serve_upload", filename=name)
+        return jsonify({"ok": True, "id": name, "url": url})
+
+    @app.get("/uploads/<path:filename>")
+    def serve_upload(filename: str):  # type: ignore[no-redef]
+        # prevent path traversal
+        if ".." in filename or filename.startswith("/"):
+            abort(400)
+        return send_from_directory(uploads_dir, filename, as_attachment=False)
+
+    # ---- Reminders CRUD ----
+    def _validate_bool(v: Any) -> int:
+        return 1 if str(v).lower() in {"1", "true", "yes", "on"} else 0
+
+    @app.post("/api/reminders")
+    def create_reminder():  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        text = (payload.get("text") or "").strip()
+        try:
+            interval_min = int(payload.get("interval_min", 30))
+        except Exception:
+            interval_min = 30
+        active = _validate_bool(payload.get("active", 1))
+        use_tts = _validate_bool(payload.get("use_tts", 1))
+        use_notif = _validate_bool(payload.get("use_notif", 0))
+
+        if not text or len(text) > 120:
+            return jsonify({"ok": False, "error": "Invalid text"}), 400
+        if not (1 <= interval_min <= 1440):
+            return jsonify({"ok": False, "error": "Invalid interval"}), 400
+
+        db = get_db()
+        cur = db.execute(
+            "INSERT INTO reminders(text, interval_min, active, use_tts, use_notif, created_at) VALUES(?,?,?,?,?,?)",
+            (text, interval_min, active, use_tts, use_notif, datetime.utcnow().isoformat()),
+        )
+        db.commit()
+        rid = cur.lastrowid
+        row = db.execute("SELECT * FROM reminders WHERE id=?", (rid,)).fetchone()
+        return jsonify({"ok": True, "reminder": dict(row) if row else None})
+
+    @app.get("/api/reminders")
+    def list_reminders():  # type: ignore[no-redef]
+        db = get_db()
+        rows = db.execute("SELECT * FROM reminders ORDER BY id DESC").fetchall()
+        return jsonify({"ok": True, "reminders": [dict(r) for r in rows]})
+
+    @app.patch("/api/reminders/<int:rid>")
+    def update_reminder(rid: int):  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        sets = []
+        vals: List[Any] = []
+        if "text" in payload:
+            text = (payload.get("text") or "").strip()
+            if not text or len(text) > 120:
+                return jsonify({"ok": False, "error": "Invalid text"}), 400
+            sets.append("text=?"); vals.append(text)
+        if "interval_min" in payload:
+            try:
+                interval_min = int(payload.get("interval_min", 30))
+            except Exception:
+                return jsonify({"ok": False, "error": "Invalid interval"}), 400
+            if not (1 <= interval_min <= 1440):
+                return jsonify({"ok": False, "error": "Invalid interval"}), 400
+            sets.append("interval_min=?"); vals.append(interval_min)
+        if "active" in payload:
+            sets.append("active=?"); vals.append(_validate_bool(payload.get("active")))
+        if "use_tts" in payload:
+            sets.append("use_tts=?"); vals.append(_validate_bool(payload.get("use_tts")))
+        if "use_notif" in payload:
+            sets.append("use_notif=?"); vals.append(_validate_bool(payload.get("use_notif")))
+
+        if not sets:
+            return jsonify({"ok": False, "error": "No fields"}), 400
+        db = get_db()
+        vals.append(rid)
+        db.execute(f"UPDATE reminders SET {', '.join(sets)} WHERE id=?", tuple(vals))
+        db.commit()
+        row = db.execute("SELECT * FROM reminders WHERE id=?", (rid,)).fetchone()
+        if not row:
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        return jsonify({"ok": True, "reminder": dict(row)})
+
+    @app.delete("/api/reminders/<int:rid>")
+    def delete_reminder(rid: int):  # type: ignore[no-redef]
+        db = get_db()
+        cur = db.execute("DELETE FROM reminders WHERE id=?", (rid,))
+        db.commit()
+        if cur.rowcount == 0:
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        return jsonify({"ok": True})
+
+    # ---- Feedback ----
+    @app.post("/api/feedback")
+    def submit_feedback():  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        mood = payload.get("mood")
+        try:
+            mood_i = int(mood) if mood is not None else None
+        except Exception:
+            mood_i = None
+        text = (payload.get("text") or "").strip()
+        if text and len(text) > 2000:
+            return jsonify({"ok": False, "error": "Text too long"}), 400
+        db = get_db()
+        db.execute(
+            "INSERT INTO feedback(mood, text, created_at) VALUES(?,?,?)",
+            (mood_i, text, datetime.utcnow().isoformat()),
+        )
+        db.commit()
+        return jsonify({"ok": True})
+
+    @app.get("/api/feedback/export.csv")
+    def export_feedback_csv():  # type: ignore[no-redef]
+        db = get_db()
+        rows = db.execute("SELECT created_at, mood, text FROM feedback ORDER BY id DESC").fetchall()
+        sio = io.StringIO()
+        w = csv.writer(sio)
+        w.writerow(["created_at", "mood", "text"])
+        for r in rows:
+            w.writerow([r["created_at"], r["mood"], r["text"]])
+        buf = io.BytesIO(sio.getvalue().encode("utf-8")); buf.seek(0)
+        return send_file(buf, mimetype="text/csv", as_attachment=True, download_name="feedback.csv")
+
+    # ---- Profiles ----
+    @app.post("/api/profiles")
+    def create_profile():  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        name = (payload.get("name") or "").strip()
+        mode = (payload.get("mode") or "study").strip()
+        theme = (payload.get("theme") or "pastel").strip()
+        mood = (payload.get("mood") or "focus").strip()
+        try:
+            font_scale = float(payload.get("font_scale", 1.0))
+        except Exception:
+            font_scale = 1.0
+
+        if not name or len(name) > 50:
+            return jsonify({"ok": False, "error": "Invalid name"}), 400
+        if mode not in ["study", "relax", "exam", "work", "custom"]:
+            mode = "study"
+        if theme not in ["pastel", "gruvbox", "catppuccin"]:
+            theme = "pastel"
+        if mood not in ["focus", "cozy", "zen"]:
+            mood = "focus"
+
+        db = get_db()
+        cur = db.execute(
+            "INSERT INTO profiles(name, mode, theme, mood, font_scale, is_active, created_at) VALUES(?,?,?,?,?,?,?)",
+            (name, mode, theme, mood, font_scale, 0, datetime.utcnow().isoformat()),
+        )
+        db.commit()
+        pid = cur.lastrowid
+        row = db.execute("SELECT * FROM profiles WHERE id=?", (pid,)).fetchone()
+        return jsonify({"ok": True, "profile": dict(row) if row else None})
+
+    @app.get("/api/profiles")
+    def list_profiles():  # type: ignore[no-redef]
+        db = get_db()
+        rows = db.execute("SELECT * FROM profiles ORDER BY is_active DESC, id DESC").fetchall()
+        return jsonify({"ok": True, "profiles": [dict(r) for r in rows]})
+
+    @app.get("/api/profiles/active")
+    def get_active_profile():  # type: ignore[no-redef]
+        db = get_db()
+        row = db.execute("SELECT * FROM profiles WHERE is_active=1 LIMIT 1").fetchone()
+        if not row:
+            return jsonify({"ok": False, "error": "No active profile"}), 404
+        return jsonify({"ok": True, "profile": dict(row)})
+
+    @app.post("/api/profiles/<int:pid>/activate")
+    def activate_profile(pid: int):  # type: ignore[no-redef]
+        db = get_db()
+        # Deactivate all profiles
+        db.execute("UPDATE profiles SET is_active=0")
+        # Activate the selected one
+        db.execute("UPDATE profiles SET is_active=1 WHERE id=?", (pid,))
+        db.commit()
+        row = db.execute("SELECT * FROM profiles WHERE id=?", (pid,)).fetchone()
+        if not row:
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        return jsonify({"ok": True, "profile": dict(row)})
+
+    @app.patch("/api/profiles/<int:pid>")
+    def update_profile(pid: int):  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        sets = []
+        vals: List[Any] = []
+        if "name" in payload:
+            name = (payload.get("name") or "").strip()
+            if not name or len(name) > 50:
+                return jsonify({"ok": False, "error": "Invalid name"}), 400
+            sets.append("name=?"); vals.append(name)
+        if "mode" in payload:
+            mode = (payload.get("mode") or "study").strip()
+            if mode not in ["study", "relax", "exam", "work", "custom"]:
+                mode = "study"
+            sets.append("mode=?"); vals.append(mode)
+        if "theme" in payload:
+            theme = (payload.get("theme") or "pastel").strip()
+            if theme not in ["pastel", "gruvbox", "catppuccin"]:
+                theme = "pastel"
+            sets.append("theme=?"); vals.append(theme)
+        if "mood" in payload:
+            mood = (payload.get("mood") or "focus").strip()
+            if mood not in ["focus", "cozy", "zen"]:
+                mood = "focus"
+            sets.append("mood=?"); vals.append(mood)
+        if "font_scale" in payload:
+            try:
+                font_scale = float(payload.get("font_scale", 1.0))
+                sets.append("font_scale=?"); vals.append(font_scale)
+            except Exception:
+                pass
+
+        if not sets:
+            return jsonify({"ok": False, "error": "No fields"}), 400
+        db = get_db()
+        vals.append(pid)
+        db.execute(f"UPDATE profiles SET {', '.join(sets)} WHERE id=?", tuple(vals))
+        db.commit()
+        row = db.execute("SELECT * FROM profiles WHERE id=?", (pid,)).fetchone()
+        if not row:
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        return jsonify({"ok": True, "profile": dict(row)})
+
+    @app.delete("/api/profiles/<int:pid>")
+    def delete_profile(pid: int):  # type: ignore[no-redef]
+        db = get_db()
+        # Prevent deleting the last profile or active profile
+        count = db.execute("SELECT COUNT(*) FROM profiles").fetchone()[0]
+        if count <= 1:
+            return jsonify({"ok": False, "error": "Cannot delete last profile"}), 400
+        row = db.execute("SELECT is_active FROM profiles WHERE id=?", (pid,)).fetchone()
+        if row and row["is_active"]:
+            return jsonify({"ok": False, "error": "Cannot delete active profile"}), 400
+        
+        cur = db.execute("DELETE FROM profiles WHERE id=?", (pid,))
+        db.commit()
+        if cur.rowcount == 0:
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        return jsonify({"ok": True})
+
+    return app
+
+
+app = create_app()
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
+
+

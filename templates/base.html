@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en" data-theme="pastel">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ambient Companion</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+    <style>
+      :root { --bg-gif: url('{{ url_for('static', filename='img/rain.gif') }}'); }
+    </style>
+  </head>
+  <body>
+    <nav class="ac-nav" role="navigation">
+      <a class="brand" href="#" data-nav="home">Ambient Companion</a>
+      <div class="spacer"></div>
+      <div class="nav-links">
+        <a href="#" data-nav="sounds" aria-label="Ambient Sounds" title="Ambient Sounds">🎧</a>
+        <a href="#" data-nav="timers" aria-label="Timers" title="Timers">⏳</a>
+        <a href="#" data-nav="reminders" aria-label="Reminders" title="Reminders">🔔</a>
+        <a href="#" data-nav="stats" aria-label="Stats" title="Stats">📊</a>
+        <a href="#" data-nav="settings" aria-label="Settings" title="Settings">⚙️</a>
+      </div>
+    </nav>
+
+    <main class="ac-container" tabindex="-1" id="app-main">
+      {% block content %}{% endblock %}
+    </main>
+
+    <div class="ac-fab panel" id="themeFab" aria-label="Theme toggle">
+      <button id="toggleTheme" class="btn">Theme</button>
+      <button id="toggleMood" class="btn ghost" aria-label="Cycle mood">Mood</button>
+      <button id="increaseFont" class="btn" aria-label="Increase font size">A+</button>
+      <button id="decreaseFont" class="btn" aria-label="Decrease font size">A-</button>
+      <button id="toggleSilent" class="btn ghost" aria-label="Silent mode">Silent</button>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}" defer></script>
+  </body>
+  </html>
+
+

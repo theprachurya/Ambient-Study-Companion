@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block content %}
+<section id="timers-page" class="panel ac-hero fade-in">
+  <h2>Pomodoro Timer</h2>
+  <p class="muted">Gentle progress with a soft ring. Receive a calm cue on finish.</p>
+  <div style="display:flex; gap:18px; align-items:center; flex-wrap:wrap; margin-top:10px;">
+    <div class="ring" id="pomodoro-ring" style="--p:0%; position:relative;">
+      <div style="position:absolute; inset:0; display:grid; place-items:center; font-weight:600;">
+        <span id="pomodoro-label">25:00</span>
+      </div>
+    </div>
+    <div class="card" style="min-width:260px;">
+      <label for="pomodoro-minutes" class="section-title">Minutes</label>
+      <input id="pomodoro-minutes" type="number" min="1" value="25" style="width:100%; padding:10px; border-radius:12px; border: 1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);" />
+      <div style="height:10px;"></div>
+      <button id="start-pomodoro" class="btn">Start</button>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+
