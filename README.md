@@ -20,7 +20,7 @@ Cozy, minimalist dashboard with ambient soundscapes, Pomodoro timers, and wellne
 
 ```bash
 python3 -m venv venv
-source venv/bin/activate
+source venv/bin/activate ||     .\venv\Scripts\activate (on Windows)
 pip install -r requirements.txt
 python app.py
 ```
