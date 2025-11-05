@@ -915,6 +915,20 @@
     const refreshPlaylistsLibraryBtn = document.getElementById('refresh-playlists-library-btn');
     const libraryPlaylistsList = document.getElementById('library-playlists-list');
 
+    // Filter elements
+    const filterAllVideos = document.getElementById('filter-all-videos');
+    const filterWatchedVideos = document.getElementById('filter-watched-videos');
+    const filterUnwatchedVideos = document.getElementById('filter-unwatched-videos');
+    const filterAllPlaylists = document.getElementById('filter-all-playlists');
+    const filterWatchedPlaylists = document.getElementById('filter-watched-playlists');
+    const filterUnwatchedPlaylists = document.getElementById('filter-unwatched-playlists');
+
+    // State variables for filters
+    let currentVideoFilter = 'all'; // 'all', 'watched', 'unwatched'
+    let currentPlaylistFilter = 'all';
+    let allVideosData = [];
+    let allPlaylistsData = [];
+
     // Tab switching
     function switchToVideos() {
       videosTabBtn.className = 'btn';
@@ -932,6 +946,70 @@
 
     videosTabBtn.addEventListener('click', switchToVideos);
     playlistsTabBtn.addEventListener('click', switchToPlaylists);
+
+    // Filter functions
+    function setVideoFilter(filter) {
+      currentVideoFilter = filter;
+      
+      // Update button styles
+      filterAllVideos.className = filter === 'all' ? 'btn' : 'btn ghost';
+      filterWatchedVideos.className = filter === 'watched' ? 'btn' : 'btn ghost';
+      filterUnwatchedVideos.className = filter === 'unwatched' ? 'btn' : 'btn ghost';
+      
+      // Filter and display
+      const filteredVideos = filterVideosData(allVideosData, filter);
+      displayVideosLibrary(filteredVideos);
+    }
+
+    function setPlaylistFilter(filter) {
+      currentPlaylistFilter = filter;
+      
+      // Update button styles
+      filterAllPlaylists.className = filter === 'all' ? 'btn' : 'btn ghost';
+      filterWatchedPlaylists.className = filter === 'watched' ? 'btn' : 'btn ghost';
+      filterUnwatchedPlaylists.className = filter === 'unwatched' ? 'btn' : 'btn ghost';
+      
+      // Filter and display
+      const filteredPlaylists = filterPlaylistsData(allPlaylistsData, filter);
+      displayPlaylistsLibrary(filteredPlaylists);
+    }
+
+    function filterVideosData(videos, filter) {
+      if (filter === 'all') return videos;
+      if (filter === 'watched') return videos.filter(v => v.watched);
+      if (filter === 'unwatched') return videos.filter(v => !v.watched);
+      return videos;
+    }
+
+    function filterPlaylistsData(playlists, filter) {
+      if (filter === 'all') return playlists;
+      
+      return playlists.map(playlist => {
+        const filteredVideos = playlist.videos.filter(v => {
+          if (filter === 'watched') return v.watched;
+          if (filter === 'unwatched') return !v.watched;
+          return true;
+        });
+        
+        // Only return playlist if it has videos matching the filter
+        if (filteredVideos.length > 0) {
+          return {
+            ...playlist,
+            videos: filteredVideos,
+            video_count: filteredVideos.length
+          };
+        }
+        return null;
+      }).filter(p => p !== null);
+    }
+
+    // Add filter event listeners
+    filterAllVideos.addEventListener('click', () => setVideoFilter('all'));
+    filterWatchedVideos.addEventListener('click', () => setVideoFilter('watched'));
+    filterUnwatchedVideos.addEventListener('click', () => setVideoFilter('unwatched'));
+    filterAllPlaylists.addEventListener('click', () => setPlaylistFilter('all'));
+    filterWatchedPlaylists.addEventListener('click', () => setPlaylistFilter('watched'));
+    filterUnwatchedPlaylists.addEventListener('click', () => setPlaylistFilter('unwatched'));
 
     // Elements
     async function searchVideos() {
@@ -1112,7 +1190,9 @@
         const data = await response.json();
 
         if (data.ok && data.library) {
-          displayVideosLibrary(data.library.videos);
+          allVideosData = data.library.videos;
+          const filteredVideos = filterVideosData(allVideosData, currentVideoFilter);
+          displayVideosLibrary(filteredVideos);
         }
       } catch (error) {
         console.error('Failed to load videos library:', error);
@@ -1126,7 +1206,9 @@
         const data = await response.json();
 
         if (data.ok && data.library) {
-          displayPlaylistsLibrary(data.library.playlists);
+          allPlaylistsData = data.library.playlists;
+          const filteredPlaylists = filterPlaylistsData(allPlaylistsData, currentPlaylistFilter);
+          displayPlaylistsLibrary(filteredPlaylists);
         }
       } catch (error) {
         console.error('Failed to load playlists library:', error);
@@ -1146,11 +1228,17 @@
           item.style.gap = '8px';
 
           const sizeInMB = (video.size / (1024 * 1024)).toFixed(1);
+          const watchedClass = video.watched ? 'watched' : '';
+          const watchedIcon = video.watched ? '✓' : '○';
+          const watchedTitle = video.watched ? 'Mark as unwatched' : 'Mark as watched';
           
           item.innerHTML = `
-            <div style="flex:1; min-width:0;">
-              <div style="font-weight:500; overflow:hidden; text-overflow:ellipsis;">${video.name}</div>
-              <div class="muted" style="font-size:0.85em;">${sizeInMB} MB</div>
+            <div style="flex:1; min-width:0; display:flex; align-items:center; gap:8px;">
+              <button class="btn ghost" style="font-size:1.2em; padding:4px 8px; min-width:36px;" data-toggle-watched="${video.path}" title="${watchedTitle}">${watchedIcon}</button>
+              <div style="flex:1; min-width:0;">
+                <div style="font-weight:500; overflow:hidden; text-overflow:ellipsis; ${video.watched ? 'opacity:0.6;' : ''}">${video.name}</div>
+                <div class="muted" style="font-size:0.85em;">${sizeInMB} MB</div>
+              </div>
             </div>
             <div style="display:flex; gap:4px;">
               <button class="btn" data-play-video="${video.path}">Play</button>
@@ -1158,6 +1246,7 @@
             </div>
           `;
 
+          item.querySelector('[data-toggle-watched]').addEventListener('click', () => toggleWatched(video.path));
           item.querySelector('[data-play-video]').addEventListener('click', () => playVideo(video.path, video.name));
           item.querySelector('[data-delete-video]').addEventListener('click', () => deleteItem(video.path, false));
           libraryVideosList.appendChild(item);
@@ -1184,10 +1273,14 @@
             <div style="display:flex; flex-direction:column; gap:4px; padding-left:12px;">
               ${playlist.videos.map(v => {
                 const sizeInMB = (v.size / (1024 * 1024)).toFixed(1);
+                const watchedIcon = v.watched ? '✓' : '○';
+                const watchedTitle = v.watched ? 'Mark as unwatched' : 'Mark as watched';
+                const videoPath = v.path || `${playlist.name}/${v.filename}`;
                 return `
-                  <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0;">
-                    <div class="muted" style="font-size:0.8em; flex:1;">• ${v.name} (${sizeInMB} MB)</div>
-                    <button class="btn ghost" style="font-size:0.75em; padding:4px 8px;" data-play-playlist-video="${playlist.name}/${v.filename}">Play</button>
+                  <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0; gap:8px;">
+                    <button class="btn ghost" style="font-size:1em; padding:2px 6px; min-width:28px;" data-toggle-watched="${videoPath}" title="${watchedTitle}">${watchedIcon}</button>
+                    <div class="muted" style="font-size:0.8em; flex:1; ${v.watched ? 'opacity:0.6;' : ''}">• ${v.name} (${sizeInMB} MB)</div>
+                    <button class="btn ghost" style="font-size:0.75em; padding:4px 8px;" data-play-playlist-video="${videoPath}">Play</button>
                   </div>
                 `;
               }).join('')}
@@ -1201,6 +1294,12 @@
             const videoPath = btn.dataset.playPlaylistVideo;
             const videoName = videoPath.split('/').pop();
             btn.addEventListener('click', () => playVideo(videoPath, videoName));
+          });
+
+          // Add toggle watched buttons for each video in playlist
+          item.querySelectorAll('[data-toggle-watched]').forEach(btn => {
+            const videoPath = btn.dataset.toggleWatched;
+            btn.addEventListener('click', () => toggleWatched(videoPath));
           });
 
           libraryPlaylistsList.appendChild(item);
@@ -1474,6 +1573,29 @@
         }
       } catch (error) {
         alert('Delete error: ' + error.message);
+      }
+    }
+
+    // Toggle watched status
+    async function toggleWatched(path) {
+      try {
+        const response = await fetch('/api/videos/toggle-watched', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path })
+        });
+
+        const data = await response.json();
+
+        if (data.ok) {
+          // Refresh both libraries since the video could be in either
+          loadVideosLibrary();
+          loadPlaylistsLibrary();
+        } else {
+          alert('Toggle watched failed: ' + (data.error || 'Unknown error'));
+        }
+      } catch (error) {
+        alert('Toggle watched error: ' + error.message);
       }
     }
 

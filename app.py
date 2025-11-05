@@ -16,6 +16,7 @@ from flask import Flask, jsonify, render_template, request, send_file, url_for, 
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", "dev-secret")
+    app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100MB for audio uploads
 
     # Data directories (default to project-local ./data for easy `flask run`)
     default_data_dir = Path(__file__).parent / "data"
@@ -185,6 +186,17 @@ def create_app() -> Flask:
                   content TEXT NOT NULL,
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL
+                );
+                """
+            )
+            # watched_videos table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS watched_videos (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  video_path TEXT NOT NULL UNIQUE,
+                  watched INTEGER NOT NULL DEFAULT 1,
+                  watched_at TEXT NOT NULL
                 );
                 """
             )
@@ -470,7 +482,7 @@ def create_app() -> Flask:
         "audio/ogg",
         "audio/webm",
     }
-    MAX_SIZE = 15 * 1024 * 1024  # 15MB
+    MAX_SIZE = 100 * 1024 * 1024  # 100MB
 
     @app.post("/api/upload")
     def upload_audio():  # type: ignore[no-redef]
@@ -1161,24 +1173,36 @@ def create_app() -> Flask:
                 "playlists": []
             }
             
+            # Get watched status from database
+            db = get_db()
+            watched_paths = {}
+            rows = db.execute("SELECT video_path, watched FROM watched_videos").fetchall()
+            for row in rows:
+                watched_paths[row[0]] = bool(row[1])
+            
             # Scan videos directory
             for item in videos_dir.iterdir():
                 if item.is_file() and item.suffix.lower() in {".mp4", ".mkv", ".webm", ".avi"}:
+                    video_path = str(item.relative_to(videos_dir))
                     library["videos"].append({
                         "name": item.stem,
                         "filename": item.name,
                         "size": item.stat().st_size,
-                        "path": str(item.relative_to(videos_dir))
+                        "path": video_path,
+                        "watched": watched_paths.get(video_path, False)
                     })
                 elif item.is_dir():
                     # It's a playlist directory
                     videos_in_playlist = []
                     for video in item.iterdir():
                         if video.is_file() and video.suffix.lower() in {".mp4", ".mkv", ".webm", ".avi"}:
+                            video_path = str(video.relative_to(videos_dir))
                             videos_in_playlist.append({
                                 "name": video.stem,
                                 "filename": video.name,
-                                "size": video.stat().st_size
+                                "size": video.stat().st_size,
+                                "path": video_path,
+                                "watched": watched_paths.get(video_path, False)
                             })
                     
                     if videos_in_playlist:
@@ -1193,6 +1217,40 @@ def create_app() -> Flask:
             library["playlists"].sort(key=lambda x: x["name"].lower())
             
             return jsonify({"ok": True, "library": library})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @app.post("/api/videos/toggle-watched")
+    def toggle_watched_status():  # type: ignore[no-redef]
+        """Toggle watched status of a video"""
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        path = (payload.get("path") or "").strip()
+        
+        if not path:
+            return jsonify({"ok": False, "error": "path required"}), 400
+        
+        try:
+            db = get_db()
+            # Check if video exists in watched_videos
+            row = db.execute("SELECT id, watched FROM watched_videos WHERE video_path = ?", (path,)).fetchone()
+            
+            if row:
+                # Toggle the watched status
+                new_watched = 0 if row[1] else 1
+                db.execute(
+                    "UPDATE watched_videos SET watched = ?, watched_at = ? WHERE video_path = ?",
+                    (new_watched, datetime.utcnow().isoformat(), path)
+                )
+                db.commit()
+                return jsonify({"ok": True, "watched": bool(new_watched)})
+            else:
+                # Add new entry as watched
+                db.execute(
+                    "INSERT INTO watched_videos(video_path, watched, watched_at) VALUES(?, 1, ?)",
+                    (path, datetime.utcnow().isoformat())
+                )
+                db.commit()
+                return jsonify({"ok": True, "watched": True})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 
