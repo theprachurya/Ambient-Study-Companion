@@ -9,8 +9,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl tzdata \
-    && rm -rf /var/lib/apt/lists/*
+      curl tzdata ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+    && chmod a+rx /usr/local/bin/yt-dlp
 
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
