@@ -7,8 +7,9 @@
     <a class="btn" href="#" data-nav="sounds">Ambient Sounds</a>
     <a class="btn ghost" href="#" data-nav="timers">Timers</a>
     <a class="btn" href="#" data-nav="reminders">Reminders</a>
-    <a class="btn ghost" href="#" data-nav="stats">Stats</a>
-    <a class="btn" href="#" data-nav="settings">Settings</a>
+    <a class="btn ghost" href="#" data-nav="journal">Journal</a>
+    <a class="btn" href="#" data-nav="stats">Stats</a>
+    <a class="btn ghost" href="#" data-nav="settings">Settings</a>
   </div>
 
   <section class="grid cols-3" style="margin-top: 18px;">
@@ -118,6 +119,50 @@
   <section class="grid cols-3" id="reminder-list" style="margin-top: 16px;"></section>
 </section>
 
+<section class="panel ac-hero fade-in" data-panel="journal" hidden>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <button class="btn ghost" data-back>Back</button>
+    <h2 style="margin:0;">Journal</h2>
+  </div>
+  <p class="muted">Capture your thoughts, reflections, and study notes. All entries are saved with timestamps.</p>
+  
+  <div class="card" style="margin-top:16px;">
+    <div class="section-title">New Entry</div>
+    <form id="journal-form" style="display:flex; flex-direction:column; gap:12px; margin-top:12px;">
+      <input 
+        type="text" 
+        id="journal-title" 
+        placeholder="Title (optional)" 
+        maxlength="200"
+        style="padding:10px; border-radius:12px; border:1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);" 
+      />
+      <textarea 
+        id="journal-content" 
+        rows="6" 
+        placeholder="Write your thoughts here..." 
+        required
+        maxlength="5000"
+        style="padding:10px; border-radius:12px; border:1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text); resize: vertical;"
+      ></textarea>
+      <div style="display:flex; gap:8px;">
+        <button class="btn" type="submit">Save Entry</button>
+        <button class="btn ghost" type="button" id="clear-journal">Clear</button>
+      </div>
+      <small id="journal-status" class="muted"></small>
+    </form>
+  </div>
+
+  <div style="margin-top:24px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+      <div class="section-title">Your Entries</div>
+      <button class="btn ghost" id="refresh-journal">Refresh</button>
+    </div>
+    <div id="journal-entries" style="display:flex; flex-direction:column; gap:12px;">
+      <p class="muted">Loading entries...</p>
+    </div>
+  </div>
+</section>
+
 <section class="panel ac-hero fade-in" data-panel="stats" hidden>
   <div style="display:flex; align-items:center; gap:10px;">
     <button class="btn ghost" data-back>Back</button>
@@ -129,7 +174,8 @@
       <div class="section-title">Daily Summary</div>
       <div id="daily-summary" style="font-size:0.9em;">
         <div><strong>Pomodoros Completed:</strong> <span id="pomodoro-count">0</span></div>
-        <div><strong>Focus Sessions:</strong> <span id="focus-sessions">0</span></div>
+        <div><strong>Stopwatch Sessions:</strong> <span id="stopwatch-count">0</span></div>
+        <div><strong>Total Focus Sessions:</strong> <span id="focus-sessions">0</span></div>
         <div><strong>Total Focus Time:</strong> <span id="focus-minutes">0 min</span></div>
         <div><strong>Reminders Triggered:</strong> <span id="reminder-count">0</span></div>
         <div><strong>Sounds Played:</strong> <span id="sound-count">0</span></div>
@@ -250,8 +296,9 @@
         <tr><td><kbd>1</kbd></td><td>Go to Sounds</td></tr>
         <tr><td><kbd>2</kbd></td><td>Go to Timers</td></tr>
         <tr><td><kbd>3</kbd></td><td>Go to Reminders</td></tr>
-        <tr><td><kbd>4</kbd></td><td>Go to Stats</td></tr>
-        <tr><td><kbd>5</kbd></td><td>Go to Settings</td></tr>
+        <tr><td><kbd>4</kbd></td><td>Go to Journal</td></tr>
+        <tr><td><kbd>5</kbd></td><td>Go to Stats</td></tr>
+        <tr><td><kbd>6</kbd></td><td>Go to Settings</td></tr>
         <tr><td><kbd>Esc</kbd></td><td>Go Back / Home</td></tr>
       </table>
     </div>

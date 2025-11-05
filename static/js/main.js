@@ -37,6 +37,19 @@
     } catch {}
   }
 
+  // Play completion sound (clock chime)
+  function playCompletionSound() {
+    try {
+      const audio = new Audio('/static/sounds/clock.mp3');
+      audio.volume = 0.6; // Set to 60% volume so it's not too loud
+      audio.play().catch(err => {
+        console.log('Could not play completion sound:', err);
+      });
+    } catch (err) {
+      console.log('Completion sound error:', err);
+    }
+  }
+
   let fontScale = parseFloat(localStorage.getItem('ac-font-scale') || '1');
   function applyFontScale() {
     root.style.fontSize = `${Math.max(0.8, Math.min(1.5, fontScale))}rem`;
@@ -93,10 +106,14 @@
         e.preventDefault();
       }
       else if (k === '4') {
-        showPanel('stats');
+        showPanel('journal');
         e.preventDefault();
       }
       else if (k === '5') {
+        showPanel('stats');
+        e.preventDefault();
+      }
+      else if (k === '6') {
         showPanel('settings');
         e.preventDefault();
       }
@@ -156,6 +173,7 @@
     if (id === 'sounds') ensureInit(initSounds);
     if (id === 'timers') ensureInit(initTimers);
     if (id === 'reminders') ensureInit(initReminders);
+    if (id === 'journal') ensureInit(initJournal);
     if (id === 'stats') ensureInit(initStats);
   }
   function ensureInit(fn) { try { fn.__inited = fn.__inited || (fn(), true); } catch {} }
@@ -203,64 +221,158 @@
   // Sounds
   function initSounds() {
     if (initSounds.__inited) return; // guard
-    const sounds = [
-      { id: 'ocean', label: 'Ocean', url: 'https://cdn.pixabay.com/download/audio/2021/09/06/audio_2c73b81c71.mp3?filename=ocean-waves-ambient-6111.mp3' },
-      { id: 'rain', label: 'Rain', url: 'https://cdn.pixabay.com/download/audio/2021/08/08/audio_2c6d1b263c.mp3?filename=rain-ambient-7250.mp3' },
-      { id: 'forest', label: 'Forest', url: 'https://cdn.pixabay.com/download/audio/2022/03/15/audio_3a6f50d6e4.mp3?filename=forest-ambience-110624.mp3' },
-      { id: 'cafe', label: 'Café', url: 'https://cdn.pixabay.com/download/audio/2022/01/03/audio_1d4f92e5c8.mp3?filename=coffee-shop-ambient-ambient-98920.mp3' },
-      { id: 'white', label: 'White Noise', url: 'https://cdn.pixabay.com/download/audio/2021/12/15/audio_d0c6a5d1c9.mp3?filename=white-noise-ambient-95408.mp3' },
-      { id: 'pink', label: 'Pink Noise', url: 'https://cdn.pixabay.com/download/audio/2022/03/09/audio_b6f6f55f6e.mp3?filename=pink-noise-ambient-20000.mp3' },
-      { id: 'brown', label: 'Brown Noise', url: 'https://cdn.pixabay.com/download/audio/2022/03/09/audio_3b6f3000d2.mp3?filename=brown-noise-ambient-20001.mp3' },
-    ];
-
+    
     const container = document.getElementById('sound-grid');
     const mixVolume = document.getElementById('mix-volume');
     const active = window.__ac_active_sounds || new Map();
     window.__ac_active_sounds = active;
+    
+    // Store slider references for each sound
+    const sliders = new Map();
 
-    sounds.forEach((s) => {
-      const card = document.createElement('div');
-      card.className = 'card fade-in';
-      const btn = document.createElement('button');
-      btn.className = 'btn';
-      btn.textContent = s.label;
-      const slider = document.createElement('input');
-      slider.type = 'range';
-      slider.min = '0';
-      slider.max = '1';
-      slider.step = '0.01';
-      slider.value = '0.7';
-
-      const audio = active.get(s.id) || new Audio(s.url);
-      audio.loop = true;
-      audio.volume = parseFloat(slider.value) * parseFloat(mixVolume.value || '1');
-
-      btn.addEventListener('click', () => {
-        if (active.has(s.id)) {
-          active.get(s.id).pause();
-          active.delete(s.id);
-          btn.textContent = s.label;
-          log('sound', 'stop', s.id);
+    // Load sounds from backend
+    fetch('/api/ambient/sounds')
+      .then(res => res.json())
+      .then(data => {
+        if (!data.ok || !data.sounds || data.sounds.length === 0) {
+          // Fallback to hardcoded sounds if API fails or returns empty
+          const fallbackSounds = [
+            { id: 'ocean', label: 'Ocean', url: 'https://cdn.pixabay.com/download/audio/2021/09/06/audio_2c73b81c71.mp3?filename=ocean-waves-ambient-6111.mp3' },
+            { id: 'rain', label: 'Rain', url: 'https://cdn.pixabay.com/download/audio/2021/08/08/audio_2c6d1b263c.mp3?filename=rain-ambient-7250.mp3' },
+            { id: 'forest', label: 'Forest', url: 'https://cdn.pixabay.com/download/audio/2022/03/15/audio_3a6f50d6e4.mp3?filename=forest-ambience-110624.mp3' },
+            { id: 'cafe', label: 'Café', url: 'https://cdn.pixabay.com/download/audio/2022/01/03/audio_1d4f92e5c8.mp3?filename=coffee-shop-ambient-ambient-98920.mp3' },
+          ];
+          renderSounds(fallbackSounds);
         } else {
-          audio.play();
-          active.set(s.id, audio);
-          btn.textContent = `Stop ${s.label}`;
-          log('sound', 'play', s.id);
+          // Use local sounds from backend
+          const sounds = data.sounds.map(s => ({
+            id: s.filename.replace(/\.[^.]+$/, ''), // Remove extension for ID
+            label: s.name,
+            url: s.url
+          }));
+          renderSounds(sounds);
         }
+      })
+      .catch(err => {
+        console.error('Failed to load sounds:', err);
+        container.innerHTML = '<p class="muted">Failed to load sounds. Please refresh the page.</p>';
       });
-      slider.addEventListener('input', () => {
+
+    function normalizeLabel(rawLabel, fallbackId) {
+      const base = (rawLabel && rawLabel.trim()) ? rawLabel : (fallbackId || '').replace(/[_-]+/g, ' ');
+      return base.replace(/\b\w/g, (ch) => ch.toUpperCase());
+    }
+
+    function guessMime(url) {
+      try {
+        const clean = url.split('?')[0];
+        const ext = (clean.split('.').pop() || '').toLowerCase();
+        if (ext === 'm4a' || ext === 'aac' || ext === 'mp4') return 'audio/mp4';
+        if (ext === 'mp3') return 'audio/mpeg';
+        if (ext === 'ogg') return 'audio/ogg';
+        if (ext === 'wav') return 'audio/wav';
+      } catch {}
+      return 'audio/mpeg';
+    }
+
+    function renderSounds(sounds) {
+      if (!container) return;
+      container.innerHTML = '';
+      sounds.forEach((s) => {
+        const card = document.createElement('div');
+        card.className = 'card fade-in';
+        const btn = document.createElement('button');
+        btn.className = 'btn';
+        const displayLabel = normalizeLabel(s.label, s.id);
+        btn.textContent = displayLabel;
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = '0';
+        slider.max = '1';
+        slider.step = '0.01';
+        slider.value = '0.7';
+        
+        // Store slider reference
+        sliders.set(s.id, slider);
+
+        // Create audio element for this sound
+        let audio = active.get(s.id);
+        const mime = guessMime(s.url);
+        if (!audio) {
+          audio = new Audio();
+          audio.loop = true;
+          audio.preload = 'metadata';
+          
+          // Add error handler
+          audio.addEventListener('error', (e) => {
+            console.error('Audio error for', displayLabel, ':', e);
+            btn.textContent = displayLabel + ' (Failed to load)';
+            btn.disabled = true;
+          });
+          
+          // Add loaded handler
+          audio.addEventListener('canplaythrough', () => {
+            console.log('Audio ready:', displayLabel);
+          });
+        }
+        if (audio.src !== s.url) {
+          audio.src = s.url;
+        }
+        if (mime && audio.canPlayType && !audio.canPlayType(mime)) {
+          console.warn('Browser may not support this format:', mime, s.url);
+        }
         audio.volume = parseFloat(slider.value) * parseFloat(mixVolume.value || '1');
+
+        btn.addEventListener('click', async () => {
+          if (active.has(s.id)) {
+            const currentAudio = active.get(s.id);
+            currentAudio.pause();
+            currentAudio.currentTime = 0; // Reset to beginning
+            active.delete(s.id);
+            btn.textContent = displayLabel;
+            log('sound', 'stop', s.id);
+          } else {
+            try {
+              // Ensure audio is loaded before playing
+              if (audio.readyState < 2) {
+                btn.textContent = 'Loading...';
+                await new Promise((resolve, reject) => {
+                  audio.addEventListener('canplay', resolve, { once: true });
+                  audio.addEventListener('error', reject, { once: true });
+                  audio.load();
+                });
+              }
+              
+              await audio.play();
+              active.set(s.id, audio);
+              btn.textContent = `Stop ${displayLabel}`;
+              log('sound', 'play', s.id);
+            } catch (err) {
+              console.error('Failed to play audio:', displayLabel, err);
+              btn.textContent = displayLabel + ' (Error - click to retry)';
+              // Don't disable button, allow retry
+            }
+          }
+        });
+        slider.addEventListener('input', () => {
+          audio.volume = parseFloat(slider.value) * parseFloat(mixVolume.value || '1');
+        });
+
+        card.appendChild(btn);
+        card.appendChild(slider);
+        container.appendChild(card);
       });
 
-      card.appendChild(btn);
-      card.appendChild(slider);
-      container.appendChild(card);
-    });
-
-    mixVolume.addEventListener('input', () => {
-      const mv = parseFloat(mixVolume.value || '1');
-      active.forEach((a) => { a.volume = mv; });
-    });
+      mixVolume.addEventListener('input', () => {
+        const mv = parseFloat(mixVolume.value || '1');
+        active.forEach((audio, soundId) => {
+          const slider = sliders.get(soundId);
+          if (slider) {
+            audio.volume = parseFloat(slider.value) * mv;
+          }
+        });
+      });
+    }
 
     // Upload handling
     const form = document.getElementById('upload-audio-form');
@@ -281,15 +393,47 @@
         const card = document.createElement('div'); card.className='card fade-in';
         const btn = document.createElement('button'); btn.className='btn'; btn.textContent='Play Upload';
         const slider = document.createElement('input'); slider.type='range'; slider.min='0'; slider.max='1'; slider.step='0.01'; slider.value='0.7';
-        const audio = new Audio(url); audio.loop=true; audio.volume=parseFloat(slider.value)*parseFloat(mixVolume.value||'1');
-        btn.addEventListener('click', () => {
-          if (active.has(id)) { active.get(id).pause(); active.delete(id); btn.textContent='Play Upload'; log('sound','stop',id); }
-          else { audio.play(); active.set(id, audio); btn.textContent='Stop Upload'; log('sound','play',id); }
+        
+          const uploadMime = guessMime(url);
+          const audio = new Audio(); 
+          audio.loop = true; 
+          audio.preload = 'metadata';
+          audio.src = url;
+          if (uploadMime && audio.canPlayType && !audio.canPlayType(uploadMime)) {
+            console.warn('Browser may not support uploaded audio format:', uploadMime, url);
+          }
+        audio.volume = parseFloat(slider.value) * parseFloat(mixVolume.value || '1');
+        
+        sliders.set(id, slider); // Store slider reference
+        
+        btn.addEventListener('click', async () => {
+          if (active.has(id)) { 
+            const currentAudio = active.get(id);
+            currentAudio.pause(); 
+            currentAudio.currentTime = 0;
+            active.delete(id); 
+            btn.textContent = 'Play Upload'; 
+            log('sound', 'stop', id); 
+          } else { 
+            try {
+              await audio.play(); 
+              active.set(id, audio); 
+              btn.textContent = 'Stop Upload'; 
+              log('sound', 'play', id);
+            } catch (err) {
+              console.error('Failed to play uploaded audio:', err);
+              btn.textContent = 'Play Upload (Error)';
+            }
+          }
         });
-        slider.addEventListener('input', () => { audio.volume = parseFloat(slider.value) * parseFloat(mixVolume.value || '1'); });
+        slider.addEventListener('input', () => { 
+          audio.volume = parseFloat(slider.value) * parseFloat(mixVolume.value || '1'); 
+        });
         card.appendChild(btn); card.appendChild(slider); container.appendChild(card);
       });
     }
+    
+    initSounds.__inited = true;
   }
 
   // Timers
@@ -354,6 +498,7 @@
               label.textContent = `${mm}:${ss.toString().padStart(2, '0')}`;
             } else if (ev.data.type === 'done') {
               label.textContent = 'Done';
+              playCompletionSound(); // Play clock chime
               speak('Time for a break. Great focus!');
               log('timer', 'pomodoro_complete', String(pomodoroMinutes));
               log('stats', 'focus_minutes', String(pomodoroMinutes));
@@ -425,6 +570,7 @@
             if (minutes > 0) {
               log('timer', 'stopwatch_complete', String(minutes));
               log('stats', 'focus_minutes', String(minutes));
+              log('stats', 'stopwatch_count', '1'); // Track stopwatch sessions separately
             }
             stopwatchStartTime = 0;
           } else if (ev.data.type === 'state') {
@@ -567,6 +713,186 @@
     return r.json();
   }
 
+  // Journal
+  function initJournal() {
+    if (initJournal.__inited) return;
+    
+    const form = document.getElementById('journal-form');
+    const titleInput = document.getElementById('journal-title');
+    const contentInput = document.getElementById('journal-content');
+    const statusEl = document.getElementById('journal-status');
+    const entriesContainer = document.getElementById('journal-entries');
+    const clearBtn = document.getElementById('clear-journal');
+    const refreshBtn = document.getElementById('refresh-journal');
+
+    // Load existing entries
+    async function loadEntries() {
+      try {
+        const res = await fetch('/api/journals');
+        const data = await res.json();
+        
+        if (!data.ok || !data.journals || data.journals.length === 0) {
+          entriesContainer.innerHTML = '<p class="muted">No journal entries yet. Start writing!</p>';
+          return;
+        }
+
+        // Render entries
+        entriesContainer.innerHTML = data.journals.map(entry => {
+          const createdDate = new Date(entry.created_at);
+          const updatedDate = new Date(entry.updated_at);
+          const isEdited = entry.created_at !== entry.updated_at;
+          
+          return `
+            <div class="card" data-entry-id="${entry.id}">
+              ${entry.title ? `<div class="section-title">${escapeHtml(entry.title)}</div>` : ''}
+              <div style="white-space: pre-wrap; margin: ${entry.title ? '12px 0' : '0'};">${escapeHtml(entry.content)}</div>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px; padding-top:12px; border-top:1px solid rgba(0,0,0,0.05);">
+                <small class="muted">
+                  ${formatDate(createdDate)}
+                  ${isEdited ? `<br/><em>Edited: ${formatDate(updatedDate)}</em>` : ''}
+                </small>
+                <button class="btn ghost" onclick="deleteJournalEntry(${entry.id})" style="padding:4px 12px; font-size:0.9em;">Delete</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      } catch (err) {
+        console.error('Failed to load journal entries:', err);
+        entriesContainer.innerHTML = '<p class="muted" style="color:red;">Failed to load entries. Please try again.</p>';
+      }
+    }
+
+    // Format date for display
+    function formatDate(date) {
+      const options = {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      };
+      return date.toLocaleDateString('en-US', options);
+    }
+
+    // Escape HTML to prevent XSS
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Save new entry
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const title = titleInput.value.trim();
+      const content = contentInput.value.trim();
+      
+      if (!content) {
+        statusEl.textContent = 'Please write something before saving.';
+        statusEl.style.color = 'red';
+        return;
+      }
+
+      try {
+        statusEl.textContent = 'Saving...';
+        statusEl.style.color = '';
+        
+        const res = await fetch('/api/journals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, content })
+        });
+        
+        const data = await res.json();
+        
+        if (data.ok) {
+          statusEl.textContent = 'Entry saved successfully! ✓';
+          statusEl.style.color = 'green';
+          
+          // Clear form
+          titleInput.value = '';
+          contentInput.value = '';
+          
+          // Reload entries
+          await loadEntries();
+          
+          // Clear status after 3 seconds
+          setTimeout(() => {
+            statusEl.textContent = '';
+          }, 3000);
+          
+          // Log the action
+          log('journal', 'create', title || 'Untitled');
+        } else {
+          statusEl.textContent = 'Failed to save: ' + (data.error || 'Unknown error');
+          statusEl.style.color = 'red';
+        }
+      } catch (err) {
+        console.error('Failed to save journal entry:', err);
+        statusEl.textContent = 'Failed to save. Please try again.';
+        statusEl.style.color = 'red';
+      }
+    });
+
+    // Clear button
+    clearBtn.addEventListener('click', () => {
+      titleInput.value = '';
+      contentInput.value = '';
+      statusEl.textContent = '';
+    });
+
+    // Refresh button
+    refreshBtn.addEventListener('click', loadEntries);
+
+    // Initial load
+    loadEntries();
+    
+    initJournal.__inited = true;
+  }
+
+  // Make deleteJournalEntry global so it can be called from HTML
+  window.deleteJournalEntry = async function(entryId) {
+    if (!confirm('Are you sure you want to delete this journal entry?')) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/journals/${entryId}`, {
+        method: 'DELETE'
+      });
+      
+      const data = await res.json();
+      
+      if (data.ok) {
+        // Reload entries
+        const initFunc = window.initJournal || initJournal;
+        if (initFunc.__inited) {
+          const entriesContainer = document.getElementById('journal-entries');
+          const statusEl = document.getElementById('journal-status');
+          
+          // Reload function
+          const res = await fetch('/api/journals');
+          const listData = await res.json();
+          
+          if (!listData.ok || !listData.journals || listData.journals.length === 0) {
+            entriesContainer.innerHTML = '<p class="muted">No journal entries yet. Start writing!</p>';
+          } else {
+            // Re-render (call loadEntries indirectly by triggering refresh)
+            document.getElementById('refresh-journal').click();
+          }
+        }
+        
+        log('journal', 'delete', entryId);
+      } else {
+        alert('Failed to delete entry: ' + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      console.error('Failed to delete journal entry:', err);
+      alert('Failed to delete entry. Please try again.');
+    }
+  };
+
   // Stats
   function initStats() {
     if (initStats.__inited) return;
@@ -574,6 +900,7 @@
     const focusEl = document.getElementById('focus-minutes');
     const focusSessionsEl = document.getElementById('focus-sessions');
     const pomodoroCountEl = document.getElementById('pomodoro-count');
+    const stopwatchCountEl = document.getElementById('stopwatch-count');
     const reminderCountEl = document.getElementById('reminder-count');
     const soundCountEl = document.getElementById('sound-count');
     const wellnessEl = document.getElementById('wellness-score');
@@ -588,6 +915,7 @@
       if (focusEl) focusEl.textContent = (j.focus_minutes || 0) + ' min';
       if (focusSessionsEl) focusSessionsEl.textContent = j.focus_sessions || 0;
       if (pomodoroCountEl) pomodoroCountEl.textContent = j.pomodoro_count || 0;
+      if (stopwatchCountEl) stopwatchCountEl.textContent = j.stopwatch_count || 0;
       if (reminderCountEl) reminderCountEl.textContent = j.reminder_count || 0;
       if (soundCountEl) soundCountEl.textContent = j.sound_count || 0;
       if (wellnessEl) {

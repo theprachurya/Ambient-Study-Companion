@@ -6,6 +6,10 @@ import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+import subprocess
+import json
+import shlex
+import re
 from typing import Any, Dict, List
 
 from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for, g, abort, send_from_directory
@@ -21,6 +25,10 @@ def create_app() -> Flask:
     data_dir.mkdir(parents=True, exist_ok=True)
     uploads_dir = data_dir / "uploads"
     uploads_dir.mkdir(parents=True, exist_ok=True)
+    videos_dir = data_dir / "videos"
+    videos_dir.mkdir(parents=True, exist_ok=True)
+    sounds_dir = data_dir / "sounds"
+    sounds_dir.mkdir(parents=True, exist_ok=True)
     db_path = data_dir / "ac.db"
     log_file = data_dir / "logs.csv"
 
@@ -30,9 +38,36 @@ def create_app() -> Flask:
             writer.writerow(["timestamp", "type", "event", "value"])  # header
 
     def append_log(event_type: str, event: str, value: str = "") -> None:
-        with log_file.open("a", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow([datetime.utcnow().isoformat(), event_type, event, value])
+        """Persist an event to both the CSV log and the SQLite events table."""
+        timestamp = datetime.utcnow().isoformat()
+
+        # Always append to the CSV file for easy inspection
+        try:
+            with log_file.open("a", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow([timestamp, event_type, event, value])
+        except Exception:
+            # CSV logging failures should not prevent database persistence
+            pass
+
+        # Mirror the event into the SQLite events table for durable stats
+        conn: sqlite3.Connection | None = None
+        try:
+            conn = sqlite3.connect(str(db_path))
+            conn.execute(
+                "INSERT INTO events(ts, type, event, value) VALUES(?,?,?,?)",
+                (timestamp, event_type or "info", event or "", value or ""),
+            )
+            conn.commit()
+        except Exception:
+            # Avoid crashing the request handler if logging fails
+            pass
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     # ---- SQLite helpers ----
     def get_db() -> sqlite3.Connection:
@@ -126,6 +161,99 @@ def create_app() -> Flask:
                 );
                 """
             )
+            # topics table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS topics (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT NOT NULL UNIQUE,
+                  created_at TEXT NOT NULL
+                );
+                """
+            )
+            # videos table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS videos (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  topic_id INTEGER NOT NULL,
+                  title TEXT NOT NULL,
+                  youtube_id TEXT,
+                  url TEXT,
+                  downloaded_path TEXT,
+                  created_at TEXT NOT NULL,
+                  FOREIGN KEY(topic_id) REFERENCES topics(id)
+                );
+                """
+            )
+            # video progress table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS video_progress (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  video_id INTEGER NOT NULL,
+                  completed INTEGER NOT NULL DEFAULT 0,
+                  updated_at TEXT NOT NULL,
+                  FOREIGN KEY(video_id) REFERENCES videos(id)
+                );
+                """
+            )
+            # notes table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notes (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  topic_id INTEGER,
+                  video_id INTEGER,
+                  text TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  FOREIGN KEY(topic_id) REFERENCES topics(id),
+                  FOREIGN KEY(video_id) REFERENCES videos(id)
+                );
+                """
+            )
+            # challenges table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS challenges (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  date TEXT NOT NULL,
+                  text TEXT NOT NULL,
+                  completed INTEGER NOT NULL DEFAULT 0,
+                  created_at TEXT NOT NULL
+                );
+                """
+            )
+            # timers table (persistent state)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS timers (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  kind TEXT NOT NULL,                 -- pomodoro | stopwatch | custom
+                  label TEXT,                         -- optional display label
+                  duration_ms INTEGER,                -- for countdown timers (nullable for stopwatch)
+                  status TEXT NOT NULL,               -- running | paused | stopped | completed
+                  started_at TEXT,                    -- iso timestamp when last started
+                  paused_at TEXT,                     -- iso timestamp when paused
+                  accumulated_ms INTEGER NOT NULL,    -- elapsed for stopwatch or used_ms for countdown
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+                """
+            )
+            # journals table (long-form notes)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS journals (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  title TEXT,
+                  content TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+                """
+            )
             conn.commit()
             # Create default profile if none exists
             count = cur.execute("SELECT COUNT(*) FROM profiles").fetchone()[0]
@@ -138,8 +266,41 @@ def create_app() -> Flask:
         finally:
             conn.close()
 
+    # Move known ambient sounds into data/sounds for serving
+    def init_sounds() -> None:
+        project_root = Path(__file__).parent
+        known_names = [
+            "coffee", "coffee-shop", "rain", "rainfall",
+            "forest", "forest-ambience", "white", "white-noise",
+        ]
+        exts = [".mp3", ".wav", ".ogg", ".webm", ".m4a"]
+        for base in known_names:
+            for ext in exts:
+                cand = project_root / f"{base}{ext}"
+                if cand.exists():
+                    dest = sounds_dir / cand.name
+                    try:
+                        if not dest.exists():
+                            cand.replace(dest)
+                    except Exception:
+                        pass
+        # Also check uploads directory for matching files
+        try:
+            for p in uploads_dir.glob("*"):
+                nm = p.stem.lower()
+                if any(k in nm for k in known_names):
+                    dest = sounds_dir / p.name
+                    if not dest.exists():
+                        try:
+                            p.replace(dest)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
     # Initialize database schema on startup
     init_db()
+    init_sounds()
 
     @app.route("/")
     def index() -> str:
@@ -192,6 +353,7 @@ def create_app() -> Flask:
         focus_minutes = 0
         focus_sessions = 0
         pomodoro_count = 0
+        stopwatch_count = 0
         reminder_count = 0
         sound_count = 0
         hydration_count = 0
@@ -216,6 +378,11 @@ def create_app() -> Flask:
             if ev == "pomodoro_count" and val:
                 try:
                     pomodoro_count += int(float(val))
+                except Exception:
+                    pass
+            if ev == "stopwatch_count" and val:
+                try:
+                    stopwatch_count += int(float(val))
                 except Exception:
                     pass
             if et == "timer" and (ev == "pomodoro_start" or ev == "stopwatch_start" or ev == "start"):
@@ -250,6 +417,7 @@ def create_app() -> Flask:
             "focus_minutes": focus_minutes,
             "focus_sessions": focus_sessions,
             "pomodoro_count": pomodoro_count,
+            "stopwatch_count": stopwatch_count,
             "reminder_count": reminder_count,
             "sound_count": sound_count,
             "hydration_count": hydration_count,
@@ -297,6 +465,7 @@ def create_app() -> Flask:
         focus_minutes = 0
         focus_sessions = 0
         pomodoro_count = 0
+        stopwatch_count = 0
         reminder_count = 0
         sound_count = 0
         hydration_count = 0
@@ -318,6 +487,11 @@ def create_app() -> Flask:
             if ev == "pomodoro_count" and val:
                 try:
                     pomodoro_count += int(float(val))
+                except Exception:
+                    pass
+            if ev == "stopwatch_count" and val:
+                try:
+                    stopwatch_count += int(float(val))
                 except Exception:
                     pass
             if et == "timer" and (ev == "pomodoro_start" or ev == "stopwatch_start" or ev == "start"):
@@ -343,8 +517,8 @@ def create_app() -> Flask:
         
         output = io.StringIO()
         w = csv.writer(output)
-        w.writerow(["Date", "Pomodoros", "Focus Sessions", "Focus Minutes", "Reminders", "Sounds", "Hydration", "Breaks", "Wellness Score"])
-        w.writerow([now.strftime("%Y-%m-%d"), pomodoro_count, focus_sessions, focus_minutes, reminder_count, sound_count, hydration_count, break_count, min(100, wellness_score)])
+        w.writerow(["Date", "Pomodoros", "Stopwatch Sessions", "Total Focus Sessions", "Focus Minutes", "Reminders", "Sounds", "Hydration", "Breaks", "Wellness Score"])
+        w.writerow([now.strftime("%Y-%m-%d"), pomodoro_count, stopwatch_count, focus_sessions, focus_minutes, reminder_count, sound_count, hydration_count, break_count, min(100, wellness_score)])
         
         data = output.getvalue().encode("utf-8")
         buf = io.BytesIO(data); buf.seek(0)
@@ -352,7 +526,16 @@ def create_app() -> Flask:
 
 
     # ---- Uploads ----
-    ALLOWED_MIME = {"audio/mpeg", "audio/wav", "audio/x-wav", "audio/ogg", "audio/webm"}
+    ALLOWED_MIME = {
+        "audio/mpeg",
+        "audio/mp4",
+        "audio/x-m4a",
+        "audio/aac",
+        "audio/wav",
+        "audio/x-wav",
+        "audio/ogg",
+        "audio/webm",
+    }
     MAX_SIZE = 15 * 1024 * 1024  # 15MB
 
     @app.post("/api/upload")
@@ -626,6 +809,599 @@ def create_app() -> Flask:
         if cur.rowcount == 0:
             return jsonify({"ok": False, "error": "Not found"}), 404
         return jsonify({"ok": True})
+
+    # ---- Video & Topics Utilities ----
+    def _slugify(value: str) -> str:
+        value = value.strip().lower()
+        value = re.sub(r"[^a-z0-9\-\_\s]", "", value)
+        value = re.sub(r"\s+", "-", value)
+        return value or "topic"
+
+    def _get_or_create_topic(db: sqlite3.Connection, name: str) -> int:
+        name = name.strip()
+        if not name:
+            raise ValueError("Topic name required")
+        row = db.execute("SELECT id FROM topics WHERE name=?", (name,)).fetchone()
+        if row:
+            return int(row[0])
+        cur = db.execute(
+            "INSERT INTO topics(name, created_at) VALUES(?,?)",
+            (name, datetime.utcnow().isoformat()),
+        )
+        db.commit()
+        return int(cur.lastrowid)
+
+    # ---- YouTube Search via yt-dlp ----
+    @app.get("/api/videos/search")
+    def search_videos():  # type: ignore[no-redef]
+        topic = (request.args.get("topic") or "").strip()
+        if not topic:
+            return jsonify({"ok": False, "error": "topic required"}), 400
+        query = f"ytsearch10:{topic}"
+        try:
+            # Use flat playlist for speed; newline-delimited JSON objects
+            cmd = [
+                "yt-dlp",
+                "--flat-playlist",
+                "--dump-json",
+                "--no-warnings",
+                query,
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"yt-dlp failed: {e}"}), 500
+        items = []
+        for line in result.stdout.splitlines():
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            # Normalize
+            items.append({
+                "id": obj.get("id"),
+                "title": obj.get("title"),
+                "url": obj.get("url") or (f"https://www.youtube.com/watch?v={obj.get('id')}" if obj.get("id") else None),
+                "ie_key": obj.get("_type") or obj.get("ie_key"),
+                "duration": obj.get("duration"),
+                "channel": obj.get("channel") or obj.get("uploader"),
+            })
+        return jsonify({"ok": True, "results": items})
+
+    # ---- Video Download via yt-dlp ----
+    @app.post("/api/videos/download")
+    def download_video():  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        topic = (payload.get("topic") or "").strip()
+        url = (payload.get("url") or "").strip()
+        title = (payload.get("title") or "").strip()
+        youtube_id = (payload.get("youtube_id") or "").strip()
+        if not topic or not url:
+            return jsonify({"ok": False, "error": "topic and url required"}), 400
+
+        db = get_db()
+        try:
+            topic_id = _get_or_create_topic(db, topic)
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+
+        slug = _slugify(topic)
+        dest_dir = videos_dir / slug
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        # Output template: title-id.ext under topic directory
+        out_tmpl = str(dest_dir / "%(title)s-%(id)s.%(ext)s")
+        try:
+            cmd = [
+                "yt-dlp",
+                "-f",
+                "bestvideo+bestaudio/best",
+                "--merge-output-format",
+                "mp4",
+                "-o",
+                out_tmpl,
+                url,
+            ]
+            subprocess.run(cmd, check=True)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"download failed: {e}"}), 500
+
+        # Find the most recent file in dest_dir as the downloaded file
+        latest_file = None
+        latest_mtime = -1.0
+        for p in dest_dir.glob("*"):
+            try:
+                m = p.stat().st_mtime
+                if m > latest_mtime:
+                    latest_mtime = m
+                    latest_file = p
+            except Exception:
+                continue
+        downloaded_path = str(latest_file) if latest_file else None
+        db.execute(
+            "INSERT INTO videos(topic_id, title, youtube_id, url, downloaded_path, created_at) VALUES(?,?,?,?,?,?)",
+            (
+                topic_id,
+                title or (latest_file.stem if latest_file else url),
+                youtube_id or None,
+                url,
+                downloaded_path,
+                datetime.utcnow().isoformat(),
+            ),
+        )
+        db.commit()
+        return jsonify({"ok": True, "path": downloaded_path})
+
+    @app.get("/api/videos")
+    def list_videos():  # type: ignore[no-redef]
+        topic = (request.args.get("topic") or "").strip()
+        db = get_db()
+        if topic:
+            row = db.execute("SELECT id FROM topics WHERE name=?", (topic,)).fetchone()
+            if not row:
+                return jsonify({"ok": True, "videos": []})
+            topic_id = int(row[0])
+            rows = db.execute(
+                """
+                SELECT v.*, coalesce(p.completed, 0) as completed
+                FROM videos v
+                LEFT JOIN video_progress p ON p.video_id = v.id
+                WHERE v.topic_id=?
+                ORDER BY v.id DESC
+                """,
+                (topic_id,),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT v.*, coalesce(p.completed, 0) as completed
+                FROM videos v
+                LEFT JOIN video_progress p ON p.video_id = v.id
+                ORDER BY v.id DESC
+                """
+            ).fetchall()
+        return jsonify({"ok": True, "videos": [dict(r) for r in rows]})
+
+    @app.post("/api/videos/progress")
+    def set_video_progress():  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        try:
+            video_id = int(payload.get("video_id"))
+        except Exception:
+            return jsonify({"ok": False, "error": "video_id required"}), 400
+        completed = 1 if str(payload.get("completed")).lower() in {"1", "true", "yes", "on"} else 0
+        db = get_db()
+        row = db.execute("SELECT id FROM videos WHERE id=?", (video_id,)).fetchone()
+        if not row:
+            return jsonify({"ok": False, "error": "Video not found"}), 404
+        existing = db.execute("SELECT id FROM video_progress WHERE video_id=?", (video_id,)).fetchone()
+        if existing:
+            db.execute(
+                "UPDATE video_progress SET completed=?, updated_at=? WHERE video_id=?",
+                (completed, datetime.utcnow().isoformat(), video_id),
+            )
+        else:
+            db.execute(
+                "INSERT INTO video_progress(video_id, completed, updated_at) VALUES(?,?,?)",
+                (video_id, completed, datetime.utcnow().isoformat()),
+            )
+        db.commit()
+        return jsonify({"ok": True})
+
+    # ---- Notes CRUD ----
+    @app.post("/api/notes")
+    def create_note():  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        text = (payload.get("text") or "").strip()
+        topic = (payload.get("topic") or "").strip()
+        video_id = payload.get("video_id")
+        if not text:
+            return jsonify({"ok": False, "error": "text required"}), 400
+        db = get_db()
+        topic_id = None
+        if topic:
+            topic_id = _get_or_create_topic(db, topic)
+        vid = None
+        if video_id is not None:
+            try:
+                vid = int(video_id)
+            except Exception:
+                return jsonify({"ok": False, "error": "invalid video_id"}), 400
+        now = datetime.utcnow().isoformat()
+        cur = db.execute(
+            "INSERT INTO notes(topic_id, video_id, text, created_at, updated_at) VALUES(?,?,?,?,?)",
+            (topic_id, vid, text, now, now),
+        )
+        db.commit()
+        nid = cur.lastrowid
+        row = db.execute("SELECT * FROM notes WHERE id=?", (nid,)).fetchone()
+        return jsonify({"ok": True, "note": dict(row) if row else None})
+
+    @app.get("/api/notes")
+    def list_notes():  # type: ignore[no-redef]
+        topic = (request.args.get("topic") or "").strip()
+        db = get_db()
+        if topic:
+            row = db.execute("SELECT id FROM topics WHERE name=?", (topic,)).fetchone()
+            if not row:
+                return jsonify({"ok": True, "notes": []})
+            tid = int(row[0])
+            rows = db.execute("SELECT * FROM notes WHERE topic_id=? ORDER BY id DESC", (tid,)).fetchall()
+        else:
+            rows = db.execute("SELECT * FROM notes ORDER BY id DESC").fetchall()
+        return jsonify({"ok": True, "notes": [dict(r) for r in rows]})
+
+    @app.patch("/api/notes/<int:nid>")
+    def update_note(nid: int):  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        text = (payload.get("text") or "").strip()
+        if not text:
+            return jsonify({"ok": False, "error": "text required"}), 400
+        db = get_db()
+        cur = db.execute(
+            "UPDATE notes SET text=?, updated_at=? WHERE id=?",
+            (text, datetime.utcnow().isoformat(), nid),
+        )
+        db.commit()
+        if cur.rowcount == 0:
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        row = db.execute("SELECT * FROM notes WHERE id=?", (nid,)).fetchone()
+        return jsonify({"ok": True, "note": dict(row) if row else None})
+
+    @app.delete("/api/notes/<int:nid>")
+    def delete_note(nid: int):  # type: ignore[no-redef]
+        db = get_db()
+        cur = db.execute("DELETE FROM notes WHERE id=?", (nid,))
+        db.commit()
+        if cur.rowcount == 0:
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        return jsonify({"ok": True})
+
+    # ---- Daily Challenges ----
+    @app.post("/api/challenges")
+    def create_challenge():  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        text = (payload.get("text") or "").strip()
+        date_s = (payload.get("date") or datetime.utcnow().strftime("%Y-%m-%d")).strip()
+        if not text:
+            return jsonify({"ok": False, "error": "text required"}), 400
+        db = get_db()
+        cur = db.execute(
+            "INSERT INTO challenges(date, text, completed, created_at) VALUES(?,?,?,?)",
+            (date_s, text, 0, datetime.utcnow().isoformat()),
+        )
+        db.commit()
+        cid = cur.lastrowid
+        row = db.execute("SELECT * FROM challenges WHERE id=?", (cid,)).fetchone()
+        return jsonify({"ok": True, "challenge": dict(row) if row else None})
+
+    @app.get("/api/challenges/today")
+    def list_today_challenges():  # type: ignore[no-redef]
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        db = get_db()
+        rows = db.execute("SELECT * FROM challenges WHERE date=? ORDER BY id DESC", (today,)).fetchall()
+        return jsonify({"ok": True, "challenges": [dict(r) for r in rows]})
+
+    @app.post("/api/challenges/<int:cid>/complete")
+    def complete_challenge(cid: int):  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        completed = 1 if str(payload.get("completed")).lower() in {"1", "true", "yes", "on"} else 0
+        db = get_db()
+        cur = db.execute(
+            "UPDATE challenges SET completed=? WHERE id=?",
+            (completed, cid),
+        )
+        db.commit()
+        if cur.rowcount == 0:
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        row = db.execute("SELECT * FROM challenges WHERE id=?", (cid,)).fetchone()
+        return jsonify({"ok": True, "challenge": dict(row) if row else None})
+
+    # ---- Persistent Timers ----
+    def _now_iso() -> str:
+        return datetime.utcnow().isoformat()
+
+    def _timer_live_fields(row: sqlite3.Row) -> Dict[str, Any]:
+        kind = row["kind"]
+        status = row["status"]
+        duration_ms = row["duration_ms"]
+        accumulated_ms = int(row["accumulated_ms"] or 0)
+        started_at = row["started_at"]
+        live_elapsed = accumulated_ms
+        live_remaining = duration_ms if duration_ms is not None else None
+        if status == "running" and started_at:
+            try:
+                started = datetime.fromisoformat(started_at)
+                delta_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
+                live_elapsed = accumulated_ms + max(0, delta_ms)
+            except Exception:
+                pass
+        if duration_ms is not None:
+            used = live_elapsed
+            rem = max(0, int(duration_ms) - used)
+            live_remaining = rem
+        return {
+            "live_elapsed_ms": live_elapsed,
+            "live_remaining_ms": live_remaining,
+        }
+
+    @app.post("/api/timers")
+    def create_timer():  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        kind = (payload.get("kind") or "pomodoro").strip()
+        label = (payload.get("label") or "").strip()
+        duration_ms_val = payload.get("duration_ms")
+        duration_ms = None
+        if duration_ms_val is not None:
+            try:
+                duration_ms = int(duration_ms_val)
+            except Exception:
+                return jsonify({"ok": False, "error": "invalid duration_ms"}), 400
+        if kind not in ["pomodoro", "stopwatch", "custom"]:
+            kind = "custom"
+        status = "running"
+        now = _now_iso()
+        db = get_db()
+        cur = db.execute(
+            """
+            INSERT INTO timers(kind, label, duration_ms, status, started_at, paused_at, accumulated_ms, created_at, updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?)
+            """,
+            (kind, label, duration_ms, status, now, None, 0, now, now),
+        )
+        db.commit()
+        tid = cur.lastrowid
+        row = db.execute("SELECT * FROM timers WHERE id=?", (tid,)).fetchone()
+        data = dict(row) if row else {}
+        data.update(_timer_live_fields(row))  # type: ignore[arg-type]
+        return jsonify({"ok": True, "timer": data})
+
+    @app.get("/api/timers")
+    def list_timers():  # type: ignore[no-redef]
+        db = get_db()
+        rows = db.execute("SELECT * FROM timers ORDER BY id DESC").fetchall()
+        timers = []
+        for r in rows:
+            d = dict(r)
+            d.update(_timer_live_fields(r))
+            timers.append(d)
+        return jsonify({"ok": True, "timers": timers})
+
+    @app.get("/api/timers/active")
+    def active_timers():  # type: ignore[no-redef]
+        db = get_db()
+        rows = db.execute("SELECT * FROM timers WHERE status IN ('running','paused') ORDER BY id DESC").fetchall()
+        timers = []
+        for r in rows:
+            d = dict(r)
+            d.update(_timer_live_fields(r))
+            timers.append(d)
+        return jsonify({"ok": True, "timers": timers})
+
+    @app.post("/api/timers/<int:tid>/pause")
+    def pause_timer(tid: int):  # type: ignore[no-redef]
+        db = get_db()
+        row = db.execute("SELECT * FROM timers WHERE id=?", (tid,)).fetchone()
+        if not row:
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        if row["status"] != "running":
+            return jsonify({"ok": False, "error": "Timer not running"}), 400
+        try:
+            started = datetime.fromisoformat(row["started_at"]) if row["started_at"] else None
+        except Exception:
+            started = None
+        accumulated_ms = int(row["accumulated_ms"] or 0)
+        if started:
+            delta_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
+            accumulated_ms += max(0, delta_ms)
+        db.execute(
+            "UPDATE timers SET status=?, paused_at=?, accumulated_ms=?, updated_at=? WHERE id=?",
+            ("paused", _now_iso(), accumulated_ms, _now_iso(), tid),
+        )
+        db.commit()
+        row = db.execute("SELECT * FROM timers WHERE id=?", (tid,)).fetchone()
+        d = dict(row)
+        d.update(_timer_live_fields(row))  # type: ignore[arg-type]
+        return jsonify({"ok": True, "timer": d})
+
+    @app.post("/api/timers/<int:tid>/resume")
+    def resume_timer(tid: int):  # type: ignore[no-redef]
+        db = get_db()
+        row = db.execute("SELECT * FROM timers WHERE id=?", (tid,)).fetchone()
+        if not row:
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        if row["status"] != "paused":
+            return jsonify({"ok": False, "error": "Timer not paused"}), 400
+        db.execute(
+            "UPDATE timers SET status=?, started_at=?, updated_at=? WHERE id=?",
+            ("running", _now_iso(), _now_iso(), tid),
+        )
+        db.commit()
+        row = db.execute("SELECT * FROM timers WHERE id=?", (tid,)).fetchone()
+        d = dict(row)
+        d.update(_timer_live_fields(row))  # type: ignore[arg-type]
+        return jsonify({"ok": True, "timer": d})
+
+    @app.post("/api/timers/<int:tid>/stop")
+    def stop_timer(tid: int):  # type: ignore[no-redef]
+        db = get_db()
+        row = db.execute("SELECT * FROM timers WHERE id=?", (tid,)).fetchone()
+        if not row:
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        accumulated_ms = int(row["accumulated_ms"] or 0)
+        if row["status"] == "running" and row["started_at"]:
+            try:
+                started = datetime.fromisoformat(row["started_at"])  # type: ignore[arg-type]
+                delta_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
+                accumulated_ms += max(0, delta_ms)
+            except Exception:
+                pass
+        status = "completed" if (row["duration_ms"] is not None and accumulated_ms >= int(row["duration_ms"])) else "stopped"
+        db.execute(
+            "UPDATE timers SET status=?, paused_at=?, accumulated_ms=?, updated_at=? WHERE id=?",
+            (status, _now_iso(), accumulated_ms, _now_iso(), tid),
+        )
+        db.commit()
+        row = db.execute("SELECT * FROM timers WHERE id=?", (tid,)).fetchone()
+        d = dict(row)
+        d.update(_timer_live_fields(row))  # type: ignore[arg-type]
+        return jsonify({"ok": True, "timer": d})
+
+    # ---- Journals CRUD ----
+    @app.post("/api/journals")
+    def create_journal():  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        title = (payload.get("title") or "").strip()
+        content = (payload.get("content") or "").strip()
+        if not content:
+            return jsonify({"ok": False, "error": "content required"}), 400
+        now = _now_iso()
+        db = get_db()
+        cur = db.execute(
+            "INSERT INTO journals(title, content, created_at, updated_at) VALUES(?,?,?,?)",
+            (title, content, now, now),
+        )
+        db.commit()
+        jid = cur.lastrowid
+        row = db.execute("SELECT * FROM journals WHERE id=?", (jid,)).fetchone()
+        return jsonify({"ok": True, "journal": dict(row) if row else None})
+
+    @app.get("/api/journals")
+    def list_journals():  # type: ignore[no-redef]
+        db = get_db()
+        rows = db.execute("SELECT * FROM journals ORDER BY id DESC").fetchall()
+        return jsonify({"ok": True, "journals": [dict(r) for r in rows]})
+
+    @app.get("/api/journals/<int:jid>")
+    def get_journal(jid: int):  # type: ignore[no-redef]
+        db = get_db()
+        row = db.execute("SELECT * FROM journals WHERE id=?", (jid,)).fetchone()
+        if not row:
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        return jsonify({"ok": True, "journal": dict(row)})
+
+    @app.patch("/api/journals/<int:jid>")
+    def update_journal(jid: int):  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        title = payload.get("title")
+        content = payload.get("content")
+        sets = []
+        vals: List[Any] = []
+        if title is not None:
+            sets.append("title=?"); vals.append((title or "").strip())
+        if content is not None:
+            c = (content or "").strip()
+            if not c:
+                return jsonify({"ok": False, "error": "content required"}), 400
+            sets.append("content=?"); vals.append(c)
+        if not sets:
+            return jsonify({"ok": False, "error": "No fields"}), 400
+        sets.append("updated_at=?"); vals.append(_now_iso())
+        vals.append(jid)
+        db = get_db()
+        cur = db.execute(f"UPDATE journals SET {', '.join(sets)} WHERE id=?", tuple(vals))
+        db.commit()
+        if cur.rowcount == 0:
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        row = db.execute("SELECT * FROM journals WHERE id=?", (jid,)).fetchone()
+        return jsonify({"ok": True, "journal": dict(row) if row else None})
+
+    @app.delete("/api/journals/<int:jid>")
+    def delete_journal(jid: int):  # type: ignore[no-redef]
+        db = get_db()
+        cur = db.execute("DELETE FROM journals WHERE id=?", (jid,))
+        db.commit()
+        if cur.rowcount == 0:
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        return jsonify({"ok": True})
+
+    # ---- Safe Linux Utilities ----
+    def _ensure_within(base: Path, target: Path) -> bool:
+        try:
+            base_r = base.resolve()
+            target_r = target.resolve()
+            return str(target_r).startswith(str(base_r))
+        except Exception:
+            return False
+
+    @app.post("/api/utils/mkdir")
+    def api_utils_mkdir():  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        rel = (payload.get("path") or "").strip().lstrip("/")
+        if not rel:
+            return jsonify({"ok": False, "error": "path required"}), 400
+        target = data_dir / rel
+        if not _ensure_within(data_dir, target):
+            return jsonify({"ok": False, "error": "invalid path"}), 400
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": True, "path": str(target)})
+
+    @app.get("/api/utils/ls")
+    def api_utils_ls():  # type: ignore[no-redef]
+        rel = (request.args.get("path") or ".").strip().lstrip("/")
+        target = data_dir / rel
+        if not _ensure_within(data_dir, target):
+            return jsonify({"ok": False, "error": "invalid path"}), 400
+        entries = []
+        try:
+            for p in target.iterdir():
+                entries.append({
+                    "name": p.name,
+                    "is_dir": p.is_dir(),
+                    "size": (p.stat().st_size if p.is_file() else None),
+                })
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": True, "entries": entries})
+
+    # ---- Ambient Sounds ----
+    @app.get("/api/ambient/sounds")
+    def list_ambient_sounds():  # type: ignore[no-redef]
+        files = []
+        try:
+            for p in sounds_dir.glob("*"):
+                if p.suffix.lower() in {".mp3", ".wav", ".ogg", ".webm", ".m4a"}:
+                    files.append({
+                        "name": p.stem,
+                        "filename": p.name,
+                        "url": url_for("serve_ambient", filename=p.name),
+                        "size": p.stat().st_size,
+                    })
+        except Exception:
+            pass
+        # Prefer stable ordering
+        files.sort(key=lambda x: x["name"])  # type: ignore[index]
+        return jsonify({"ok": True, "sounds": files})
+
+    @app.get("/ambient/<path:filename>")
+    def serve_ambient(filename: str):  # type: ignore[no-redef]
+        if ".." in filename or filename.startswith("/"):
+            abort(400)
+        return send_from_directory(sounds_dir, filename, as_attachment=False)
+
+    # ---- Simple Chatbot ----
+    @app.post("/api/chat")
+    def api_chat():  # type: ignore[no-redef]
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        message = (payload.get("message") or "").strip()
+        if not message:
+            return jsonify({"ok": False, "error": "message required"}), 400
+        # Minimal heuristic-based responses to run locally
+        lower = message.lower()
+        if any(k in lower for k in ["hello", "hi", "hey"]):
+            reply = "Hi! What topic are you studying today?"
+        elif "video" in lower and "topic" in lower:
+            reply = "You can search videos via /api/videos/search?topic=YOUR_TOPIC."
+        elif "challenge" in lower:
+            reply = "Add a daily challenge with POST /api/challenges and view today's at /api/challenges/today."
+        elif "note" in lower:
+            reply = "Create a note with POST /api/notes {text, topic?, video_id?}."
+        else:
+            reply = "Got it. I logged your message. Try asking about videos, notes, or challenges."
+        append_log("chat", "user_msg", message)
+        append_log("chat", "bot_reply", reply)
+        return jsonify({"ok": True, "reply": reply})
 
     return app
 
