@@ -106,3 +106,10 @@ timestamp,type,event,value
 2025-11-05T14:56:48.751156,sound,play,whitenoise
 2025-11-05T14:56:49.180939,sound,stop,rain
 2025-11-05T14:56:50.698368,sound,stop,whitenoise
+2025-11-05T15:08:23.345175,timer,pomodoro_start,1
+2025-11-05T15:08:43.054259,journal,create,test journal
+2025-11-05T15:09:23.491926,timer,pomodoro_complete,1
+2025-11-05T15:09:23.492943,stats,focus_minutes,1
+2025-11-05T15:09:23.493335,stats,pomodoro_count,1
+2025-11-05T15:09:34.821567,reminder,2,1
+2025-11-05T15:09:34.823670,reminder,2,1
