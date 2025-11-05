@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="panel ac-hero fade-in">
+  <h2>Settings</h2>
+  <p class="muted">Theme and accessibility preferences are in the floating panel.</p>
+  <div class="grid cols-3" style="margin-top: 12px;">
+    <div class="card">
+      <div class="section-title">Theme</div>
+      <p>Use the Theme button (bottom-right) to cycle Pastel, Gruvbox, Catppuccin.</p>
+    </div>
+    <div class="card">
+      <div class="section-title">Font Size</div>
+      <p>Use A+/A- for comfortable reading. Keyboard: Ctrl/Cmd+K focuses content.</p>
+    </div>
+    <div class="card">
+      <div class="section-title">Notifications</div>
+      <p>Reminders speak softly via your browser’s text-to-speech.</p>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+

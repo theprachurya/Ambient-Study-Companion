@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block content %}
+<section id="reminders-page" class="panel ac-hero fade-in">
+  <h2>Wellness Reminders</h2>
+  <p class="muted">Hydrate, stretch, breathe—at intervals you choose. Optional voice cues.</p>
+  <div class="card" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <input id="reminder-text" type="text" placeholder="Reminder text (e.g., Hydrate)" aria-label="Reminder text" style="flex:1; min-width:220px; padding:10px; border-radius:12px; border:1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);" />
+    <input id="reminder-mins" type="number" min="1" value="30" aria-label="Minutes interval" style="width:100px; padding:10px; border-radius:12px; border:1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);" />
+    <button id="add-reminder" class="btn">Add Reminder</button>
+  </div>
+</section>
+
+<section class="grid cols-3" id="reminder-list" style="margin-top: 16px;"></section>
+{% endblock %}
+
+

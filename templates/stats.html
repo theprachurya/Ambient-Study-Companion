@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% block content %}
+<section id="stats-page" class="panel ac-hero fade-in">
+  <h2>Ambient Stats</h2>
+  <p class="muted">A light glance at recent activity. Export for deeper review.</p>
+  <div class="grid cols-3" style="margin-top: 12px;">
+    <div class="card">
+      <div class="section-title">Totals</div>
+      <div id="totals" aria-live="polite">{}</div>
+    </div>
+    <div class="card">
+      <div class="section-title">Focused</div>
+      <div id="focus-minutes">0 min</div>
+    </div>
+    <div class="card">
+      <div class="section-title">Export</div>
+      <button class="btn" id="export-csv">Export CSV</button>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+

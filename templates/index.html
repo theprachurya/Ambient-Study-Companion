@@ -1,0 +1,429 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="panel ac-hero fade-in" data-panel="home" id="panel-home">
+  <h1>Welcome to Ambient Companion</h1>
+  <p class="muted">Cozy focus with ambient soundscapes, Pomodoro, and gentle wellness nudges.</p>
+  <div style="display:flex; gap:12px; flex-wrap: wrap; margin-top: 10px;">
+    <a class="btn" href="#" data-nav="sounds">Ambient Sounds</a>
+    <a class="btn ghost" href="#" data-nav="timers">Timers</a>
+    <a class="btn" href="#" data-nav="reminders">Reminders</a>
+    <a class="btn ghost" href="#" data-nav="videos">Videos</a>
+    <a class="btn" href="#" data-nav="journal">Journal</a>
+    <a class="btn ghost" href="#" data-nav="stats">Stats</a>
+    <a class="btn" href="#" data-nav="settings">Settings</a>
+  </div>
+
+  <section class="grid cols-3" style="margin-top: 18px;">
+    <div class="card">
+      <div class="section-title">Quick Start</div>
+      <p>Pick a soundscape and start a Pomodoro. I’ll keep gentle logs for your stats.</p>
+    </div>
+    <div class="card">
+      <div class="section-title">Theme</div>
+      <p>Switch between Pastel, Gruvbox, and Catppuccin via the floating panel.</p>
+    </div>
+    <div class="card">
+      <div class="section-title">Accessibility</div>
+      <p>Keyboard-friendly, adjustable font sizes, and optional speech reminders.</p>
+    </div>
+  </section>
+</section>
+
+<section class="panel ac-hero fade-in" data-panel="sounds" hidden>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <button class="btn ghost" data-back>Back</button>
+    <h2 style="margin:0;">Ambient Sounds</h2>
+  </div>
+  <p class="muted">Mix and match soft soundscapes. Adjust volumes to taste.</p>
+  <div style="margin-top:10px;">
+    <label>Mix Volume: <input type="range" id="mix-volume" min="0" max="1" step="0.01" value="0.7" /></label>
+  </div>
+  <div class="grid cols-3" id="sound-grid" style="margin-top: 16px;"></div>
+  <div class="card" style="margin-top: 14px;">
+    <div class="section-title">Upload your own</div>
+    <form id="upload-audio-form">
+      <input type="file" accept="audio/*" id="upload-audio" />
+      <button type="submit" class="btn" style="margin-left:8px;">Upload</button>
+    </form>
+    <div id="upload-audio-msg" class="muted" style="margin-top:6px;"></div>
+  </div>
+  <div style="height:8px;"></div>
+</section>
+
+<section class="panel ac-hero fade-in" data-panel="timers" hidden>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <button class="btn ghost" data-back>Back</button>
+    <h2 style="margin:0;">Focus Timers</h2>
+  </div>
+  <p class="muted">Work sessions with breaks. Clock chimes at the end of each session.</p>
+  
+  <!-- Pomodoro Timer -->
+  <div id="pomodoro-container" style="margin-top:16px;">
+    <h3>Pomodoro Timer</h3>
+    <div style="display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap; margin-top:10px;">
+      <div class="ring" id="pomodoro-ring" style="--p:0%; position:relative;">
+        <div style="position:absolute; inset:0; display:grid; place-items:center; font-weight:600;">
+          <div style="text-align:center;">
+            <div id="pomodoro-label">25:00</div>
+            <div id="pomodoro-status" style="font-size:0.7em; margin-top:4px; opacity:0.7;">Ready</div>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="min-width:280px;">
+        <label for="pomodoro-sessions" class="section-title">Sessions</label>
+        <input id="pomodoro-sessions" type="number" min="1" max="10" value="4" style="width:100%; padding:10px; border-radius:12px; border: 1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text); margin-bottom:12px;" />
+        
+        <label for="pomodoro-work-mins" class="section-title">Work Duration (minutes)</label>
+        <input id="pomodoro-work-mins" type="number" min="1" max="60" value="25" style="width:100%; padding:10px; border-radius:12px; border: 1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text); margin-bottom:12px;" />
+        
+        <label for="pomodoro-break-mins" class="section-title">Break Duration (minutes)</label>
+        <input id="pomodoro-break-mins" type="number" min="1" max="30" value="5" style="width:100%; padding:10px; border-radius:12px; border: 1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text); margin-bottom:16px;" />
+        
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button id="start-pomodoro" class="btn">Start</button>
+          <button id="pause-pomodoro" class="btn ghost" style="display:none;">Pause</button>
+          <button id="resume-pomodoro" class="btn ghost" style="display:none;">Resume</button>
+          <button id="skip-pomodoro" class="btn ghost" style="display:none;">Skip</button>
+          <button id="stop-pomodoro" class="btn ghost" style="display:none;">Stop</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stopwatch -->
+  <div id="stopwatch-container" style="margin-top:32px;">
+    <h3>Stopwatch</h3>
+    <p class="muted">Track your focus time freely.</p>
+    <div style="display:flex; gap:18px; align-items:center; flex-wrap:wrap; margin-top:10px;">
+      <div class="ring" id="stopwatch-ring" style="--p:100%; position:relative; background: conic-gradient(var(--accent) 100%, transparent 0);">
+        <div style="position:absolute; inset:0; display:grid; place-items:center; font-weight:600;">
+          <span id="stopwatch-label">00:00</span>
+        </div>
+      </div>
+      <div class="card" style="min-width:260px;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button id="start-stopwatch" class="btn">Start</button>
+          <button id="pause-stopwatch" class="btn ghost" style="display:none;">Pause</button>
+          <button id="resume-stopwatch" class="btn ghost" style="display:none;">Resume</button>
+          <button id="stop-stopwatch" class="btn ghost" style="display:none;">Stop</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="panel ac-hero fade-in" data-panel="reminders" hidden>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <button class="btn ghost" data-back>Back</button>
+    <h2 style="margin:0;">Wellness Reminders</h2>
+  </div>
+  <p class="muted">Hydrate, stretch, breathe—at intervals you choose. Optional voice cues.</p>
+  <div class="card" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <input id="reminder-text" type="text" placeholder="Reminder text (e.g., Hydrate)" aria-label="Reminder text" style="flex:1; min-width:220px; padding:10px; border-radius:12px; border:1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);" />
+    <input id="reminder-mins" type="number" min="1" value="30" aria-label="Minutes interval" style="width:100px; padding:10px; border-radius:12px; border:1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);" />
+    <button id="add-reminder" class="btn">Add Reminder</button>
+  </div>
+  <section class="grid cols-3" id="reminder-list" style="margin-top: 16px;"></section>
+</section>
+
+<section class="panel ac-hero fade-in" data-panel="videos" hidden>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <button class="btn ghost" data-back>Back</button>
+    <h2 style="margin:0;">Study Videos</h2>
+  </div>
+  <p class="muted">Search and download YouTube videos or playlists for offline study.</p>
+
+  <!-- Tab Selector -->
+  <div class="card" style="margin-top:16px;">
+    <div style="display:flex; gap:8px;">
+      <button id="videos-tab-btn" class="btn" style="flex:1;">Videos</button>
+      <button id="playlists-tab-btn" class="btn ghost" style="flex:1;">Playlists</button>
+    </div>
+  </div>
+
+  <!-- Videos Tab -->
+  <div id="videos-tab-content">
+    <!-- Search Section -->
+    <div class="card" style="margin-top:16px;">
+      <div class="section-title">Search & Download</div>
+      <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+        <input 
+          id="video-search-input" 
+          type="text" 
+          placeholder="Search for videos or paste URL..." 
+          style="flex:1; min-width:250px; padding:10px; border-radius:12px; border:1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);"
+        />
+        <button id="video-search-btn" class="btn">Search</button>
+      </div>
+      <div id="video-search-status" class="muted" style="margin-top:8px; font-size:0.9em;"></div>
+    </div>
+
+    <!-- Search Results -->
+    <div id="video-search-results" style="margin-top:16px; display:none;">
+      <div class="section-title">Results</div>
+      <div id="video-results-list" style="display:flex; flex-direction:column; gap:12px; margin-top:12px;"></div>
+    </div>
+
+    <!-- Library Section -->
+    <div class="card" style="margin-top:24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div class="section-title">Downloaded Videos</div>
+        <button class="btn ghost" id="refresh-videos-library-btn">Refresh</button>
+      </div>
+      
+      <!-- Filter Tabs -->
+      <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+        <button id="filter-all-videos" class="btn" style="flex:1; min-width:80px;">All</button>
+        <button id="filter-watched-videos" class="btn ghost" style="flex:1; min-width:80px;">Watched</button>
+        <button id="filter-unwatched-videos" class="btn ghost" style="flex:1; min-width:80px;">Unwatched</button>
+      </div>
+      
+      <div id="library-videos-list" style="display:flex; flex-direction:column; gap:8px;">
+        <p class="muted">No videos downloaded yet.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Playlists Tab -->
+  <div id="playlists-tab-content" style="display:none;">
+    <!-- Paste Playlist Link Section -->
+    <div class="card" style="margin-top:16px;">
+      <div class="section-title">Download Playlist</div>
+      <p class="muted" style="font-size:0.9em; margin-bottom:12px;">Paste a YouTube playlist URL to download all videos</p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <input 
+          id="playlist-url-input" 
+          type="text" 
+          placeholder="https://www.youtube.com/playlist?list=..." 
+          style="flex:1; min-width:250px; padding:10px; border-radius:12px; border:1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);"
+        />
+        <button id="playlist-download-btn" class="btn">Download Playlist</button>
+      </div>
+      <div id="playlist-download-status" class="muted" style="margin-top:8px; font-size:0.9em;"></div>
+    </div>
+
+    <!-- Downloaded Playlists Library -->
+    <div class="card" style="margin-top:24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div class="section-title">Downloaded Playlists</div>
+        <button class="btn ghost" id="refresh-playlists-library-btn">Refresh</button>
+      </div>
+      
+      <!-- Filter Tabs -->
+      <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+        <button id="filter-all-playlists" class="btn" style="flex:1; min-width:80px;">All</button>
+        <button id="filter-watched-playlists" class="btn ghost" style="flex:1; min-width:80px;">Watched</button>
+        <button id="filter-unwatched-playlists" class="btn ghost" style="flex:1; min-width:80px;">Unwatched</button>
+      </div>
+      
+      <div id="library-playlists-list" style="display:flex; flex-direction:column; gap:8px;">
+        <p class="muted">No playlists downloaded yet.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="panel ac-hero fade-in" data-panel="journal" hidden>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <button class="btn ghost" data-back>Back</button>
+    <h2 style="margin:0;">Journal</h2>
+  </div>
+  <p class="muted">Capture your thoughts, reflections, and study notes. All entries are saved with timestamps.</p>
+  
+  <div class="card" style="margin-top:16px;">
+    <div class="section-title">New Entry</div>
+    <form id="journal-form" style="display:flex; flex-direction:column; gap:12px; margin-top:12px;">
+      <input 
+        type="text" 
+        id="journal-title" 
+        placeholder="Title (optional)" 
+        maxlength="200"
+        style="padding:10px; border-radius:12px; border:1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);" 
+      />
+      <textarea 
+        id="journal-content" 
+        rows="6" 
+        placeholder="Write your thoughts here..." 
+        required
+        maxlength="5000"
+        style="padding:10px; border-radius:12px; border:1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text); resize: vertical;"
+      ></textarea>
+      <div style="display:flex; gap:8px;">
+        <button class="btn" type="submit">Save Entry</button>
+        <button class="btn ghost" type="button" id="clear-journal">Clear</button>
+      </div>
+      <small id="journal-status" class="muted"></small>
+    </form>
+  </div>
+
+  <div style="margin-top:24px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+      <div class="section-title">Your Entries</div>
+      <button class="btn ghost" id="refresh-journal">Refresh</button>
+    </div>
+    <div id="journal-entries" style="display:flex; flex-direction:column; gap:12px;">
+      <p class="muted">Loading entries...</p>
+    </div>
+  </div>
+</section>
+
+<section class="panel ac-hero fade-in" data-panel="stats" hidden>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <button class="btn ghost" data-back>Back</button>
+    <h2 style="margin:0;">Ambient Stats</h2>
+  </div>
+  <p class="muted">A light glance at recent activity. Export for deeper review.</p>
+  <div class="grid cols-3" style="margin-top: 12px;">
+    <div class="card">
+      <div class="section-title">Daily Summary</div>
+      <div id="daily-summary" style="font-size:0.9em;">
+        <div><strong>Pomodoros Completed:</strong> <span id="pomodoro-count">0</span></div>
+        <div><strong>Stopwatch Sessions:</strong> <span id="stopwatch-count">0</span></div>
+        <div><strong>Total Focus Sessions:</strong> <span id="focus-sessions">0</span></div>
+        <div><strong>Total Focus Time:</strong> <span id="focus-minutes">0 min</span></div>
+        <div><strong>Reminders Triggered:</strong> <span id="reminder-count">0</span></div>
+        <div><strong>Sounds Played:</strong> <span id="sound-count">0</span></div>
+        <div style="margin-top:8px;"><button class="btn ghost" id="export-summary">Export Summary</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title">Event Totals</div>
+      <div id="totals" aria-live="polite" style="font-size:0.9em;">{}</div>
+    </div>
+    <div class="card">
+      <div class="section-title">Wellness Score</div>
+      <div id="wellness-score" style="font-size:2em; font-weight:600; color: var(--primary);">--</div>
+      <div class="muted" style="font-size:0.85em;">Based on hydration, breaks, and focus</div>
+    </div>
+    <div class="card">
+      <div class="section-title">Export Data</div>
+      <button class="btn" id="export-csv">Export All CSV</button>
+      <button class="btn ghost" id="export-daily" style="margin-left:8px;">Export 24h</button>
+    </div>
+  </div>
+</section>
+
+<section class="panel ac-hero fade-in" data-panel="settings" hidden>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <button class="btn ghost" data-back>Back</button>
+    <h2 style="margin:0;">Settings</h2>
+  </div>
+  <p class="muted">Theme and accessibility preferences are in the floating panel.</p>
+  <div class="grid cols-3" style="margin-top: 12px;">
+    <div class="card">
+      <div class="section-title">Profile Switching</div>
+      <p>Create and switch between different profiles for various modes.</p>
+      <div style="margin-top:8px;">
+        <label>Active Profile: <span id="active-profile-name" style="font-weight:600;">Default</span></label>
+      </div>
+      <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn" id="manage-profiles">Manage Profiles</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title">Theme</div>
+      <p>Use the Theme button (bottom-right) to cycle Pastel, Gruvbox, Catppuccin.</p>
+    </div>
+    <div class="card">
+      <div class="section-title">Font Size</div>
+      <p>Use A+/A- for comfortable reading. Keyboard: Ctrl/Cmd+K focuses content.</p>
+    </div>
+    <div class="card">
+      <div class="section-title">Keyboard Shortcuts</div>
+      <p>Access the app quickly with keyboard shortcuts. Press <kbd>?</kbd> or click below for a full list.</p>
+      <button class="btn" id="show-keyboard-help">Show Shortcuts</button>
+    </div>
+    <div class="card">
+      <div class="section-title">Silent Mode</div>
+      <p>Mute all sounds and pause reminders instantly from the floating panel.</p>
+    </div>
+    <div class="card">
+      <div class="section-title">Notifications</div>
+      <p>Desktop notifications are used for reminders. Test and grant permission:</p>
+      <button class="btn" id="test-notifications">Test Notifications</button>
+      <small class="muted">If you see no prompt, check your browser's site settings for this origin.</small>
+    </div>
+    <div class="card">
+      <div class="section-title">Feedback / Journal</div>
+      <form id="feedback-form" style="display:flex; flex-direction:column; gap:8px;">
+        <label>Mood (1-5)
+          <input type="number" id="feedback-mood" min="1" max="5" value="3" style="width:80px; padding:8px; border-radius:12px; border: 1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);" />
+        </label>
+        <textarea id="feedback-text" rows="3" placeholder="Write a short note..." style="padding:10px; border-radius:12px; border:1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);"></textarea>
+        <div>
+          <button class="btn" type="submit">Submit</button>
+          <a class="btn ghost" href="/api/feedback/export.csv" style="margin-left:8px;">Export</a>
+        </div>
+        <small id="feedback-status" class="muted"></small>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- Profile Management Modal -->
+<div id="profile-modal" class="modal" style="display:none;">
+  <div class="modal-content panel" style="max-width:600px; margin:60px auto; padding:24px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+      <h3 style="margin:0;">Profile Management</h3>
+      <button class="btn ghost" id="close-profile-modal">✕</button>
+    </div>
+    <div class="card" style="margin-bottom:16px;">
+      <div class="section-title">Create New Profile</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+        <input id="new-profile-name" type="text" placeholder="Profile name" style="flex:1; min-width:150px; padding:8px; border-radius:12px; border:1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);" />
+        <select id="new-profile-mode" style="padding:8px; border-radius:12px; border:1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);">
+          <option value="study">Study</option>
+          <option value="relax">Relax</option>
+          <option value="exam">Exam</option>
+          <option value="work">Work</option>
+          <option value="custom">Custom</option>
+        </select>
+        <button class="btn" id="create-profile-btn">Create</button>
+      </div>
+    </div>
+    <div class="section-title">Your Profiles</div>
+    <div id="profile-list" style="display:flex; flex-direction:column; gap:8px; margin-top:8px;"></div>
+  </div>
+</div>
+
+<!-- Keyboard Shortcuts Help Modal -->
+<div id="keyboard-help-modal" class="modal" style="display:none;">
+  <div class="modal-content panel" style="max-width:600px; margin:60px auto; padding:24px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+      <h3 style="margin:0;">Keyboard Shortcuts</h3>
+      <button class="btn ghost" id="close-keyboard-help">✕</button>
+    </div>
+    <div class="card" style="margin-bottom:12px;">
+      <div class="section-title">Navigation</div>
+      <table style="width:100%; font-size:0.9em;">
+        <tr><td><kbd>H</kbd></td><td>Go to Home</td></tr>
+        <tr><td><kbd>1</kbd></td><td>Go to Sounds</td></tr>
+        <tr><td><kbd>2</kbd></td><td>Go to Timers</td></tr>
+        <tr><td><kbd>3</kbd></td><td>Go to Reminders</td></tr>
+        <tr><td><kbd>4</kbd></td><td>Go to Videos</td></tr>
+        <tr><td><kbd>5</kbd></td><td>Go to Journal</td></tr>
+        <tr><td><kbd>6</kbd></td><td>Go to Stats</td></tr>
+        <tr><td><kbd>7</kbd></td><td>Go to Settings</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>Go Back / Home</td></tr>
+      </table>
+    </div>
+    <div class="card" style="margin-bottom:12px;">
+      <div class="section-title">Controls</div>
+      <table style="width:100%; font-size:0.9em;">
+        <tr><td><kbd>Space</kbd></td><td>Start/Resume Timer (on Timers page)</td></tr>
+        <tr><td><kbd>M</kbd></td><td>Toggle Silent Mode</td></tr>
+        <tr><td><kbd>T</kbd></td><td>Cycle Theme</td></tr>
+        <tr><td><kbd>+</kbd> / <kbd>-</kbd></td><td>Increase/Decrease Font Size</td></tr>
+        <tr><td><kbd>Ctrl+K</kbd> or <kbd>Cmd+K</kbd></td><td>Focus Main Content</td></tr>
+        <tr><td><kbd>?</kbd></td><td>Show This Help</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <div class="section-title">Accessibility</div>
+      <p style="font-size:0.9em;">Tab through interactive elements, use arrow keys in form fields, and screen readers will announce all labels.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+
