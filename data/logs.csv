@@ -98,3 +98,11 @@ timestamp,type,event,value
 2025-11-05T09:00:01.684242,reminder,2,test
 2025-11-05T09:00:02.633110,reminder,2,test
 2025-11-05T09:00:02.975160,reminder,2,test
+2025-11-05T14:56:42.883347,sound,play,forest
+2025-11-05T14:56:43.913839,sound,play,kofi
+2025-11-05T14:56:44.371702,sound,stop,forest
+2025-11-05T14:56:47.395953,sound,play,rain
+2025-11-05T14:56:47.825842,sound,stop,kofi
+2025-11-05T14:56:48.751156,sound,play,whitenoise
+2025-11-05T14:56:49.180939,sound,stop,rain
+2025-11-05T14:56:50.698368,sound,stop,whitenoise
