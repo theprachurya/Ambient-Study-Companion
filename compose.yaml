@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  ambient-companion:
+    image: ambient-companion
+    container_name: ambient-companion
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_SECRET_KEY=change-me-to-something-secure
+    volumes:
+      - ./data:/data:z
+    restart: unless-stopped

@@ -1,0 +1,15 @@
+[Unit]
+Description=Ambient Study Companion
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/zen/LINUX_PROJECT
+ExecStart=/usr/bin/podman run --rm --name ambient-companion -p 5000:5000 -e FLASK_SECRET_KEY=change-me -v /home/zen/LINUX_PROJECT/data:/data:z ambient-companion
+ExecStop=/usr/bin/podman stop ambient-companion
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -27,23 +27,65 @@ python app.py
 
 Open http://localhost:5000
 
-## Container (Podman)
+## Container (Podman/Docker)
 
-Build:
+### Quick Start (Recommended)
+
+**Option 1: Using the convenience script**
 ```bash
-podman build -t ambient-companion -f Containerfile .
+./start.sh
 ```
-Run:
+
+**Option 2: Using compose**
 ```bash
-podman run --rm -it -p 5000:5000 -e FLASK_SECRET_KEY=change-me \
-  -v $(pwd)/data:/data:z ambient-companion
+# Using podman-compose
+podman-compose up -d
+
+# Or using docker-compose
+docker-compose up -d
+```
+
+**Option 3: Manual command**
+```bash
+# Build the image
+podman build -t ambient-companion -f Containerfile .
+
+# Run the container
+podman run -d \
+  --name ambient-companion \
+  -p 5000:5000 \
+  -e FLASK_SECRET_KEY=change-me-to-something-secure \
+  -v $(pwd)/data:/data:z \
+  --restart unless-stopped \
+  ambient-companion
 ```
 
 Then open http://localhost:5000
 
-Data is persisted in `./data/` (SQLite DB + CSV logs).
+### Container Management
 
-## Pages
+```bash
+# View logs
+podman logs -f ambient-companion
+
+# Stop the container
+podman stop ambient-companion
+
+# Start existing container
+podman start ambient-companion
+
+# Restart
+podman restart ambient-companion
+
+# Remove container
+podman rm -f ambient-companion
+```
+
+Data is persisted in `./data/` (SQLite DB + CSV logs + videos + uploads).
+
+**Note:** The container image is ~900MB due to ffmpeg and multimedia dependencies required for video download functionality.
+
+## Local Dev
 - **Sounds**: Select and mix ambient tracks, upload your own
 - **Timers**: Pomodoro with pastel progress ring, pause/resume controls
 - **Reminders**: Voice nudges at chosen intervals, TTS & notification options
