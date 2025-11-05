@@ -6,6 +6,8 @@ import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+import subprocess
+import json
 from typing import Any, Dict, List
 
 from flask import Flask, jsonify, render_template, request, send_file, url_for, g, abort, send_from_directory
@@ -21,6 +23,8 @@ def create_app() -> Flask:
     data_dir.mkdir(parents=True, exist_ok=True)
     uploads_dir = data_dir / "uploads"
     uploads_dir.mkdir(parents=True, exist_ok=True)
+    videos_dir = data_dir / "videos"
+    videos_dir.mkdir(parents=True, exist_ok=True)
     sounds_dir = data_dir / "sounds"
     sounds_dir.mkdir(parents=True, exist_ok=True)
     db_path = data_dir / "ac.db"
@@ -1024,6 +1028,227 @@ def create_app() -> Flask:
         if ".." in filename or filename.startswith("/"):
             abort(400)
         return send_from_directory(sounds_dir, filename, as_attachment=False)
+
+    # ---- YouTube Video Search & Download ----
+    @app.get("/api/videos/search")
+    def search_videos():  # type: ignore[no-redef]
+        """Search YouTube videos using yt-dlp"""
+        query = (request.args.get("query") or "").strip()
+        if not query:
+            return jsonify({"ok": False, "error": "query required"}), 400
+        
+        try:
+            # Search for up to 20 results
+            search_query = f"ytsearch20:{query}"
+            result = subprocess.run(
+                ["yt-dlp", "--flat-playlist", "--dump-json", "--no-warnings", search_query],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=30
+            )
+            
+            videos = []
+            for line in result.stdout.strip().split('\n'):
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    videos.append({
+                        "id": data.get("id"),
+                        "title": data.get("title"),
+                        "url": data.get("url") or f"https://www.youtube.com/watch?v={data.get('id')}",
+                        "duration": data.get("duration"),
+                        "channel": data.get("channel") or data.get("uploader"),
+                        "thumbnail": data.get("thumbnail"),
+                        "description": data.get("description", "")[:200] if data.get("description") else ""
+                    })
+                except json.JSONDecodeError:
+                    continue
+            
+            return jsonify({"ok": True, "videos": videos})
+        except subprocess.TimeoutExpired:
+            return jsonify({"ok": False, "error": "Search timeout"}), 408
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @app.post("/api/videos/download")
+    def download_video():  # type: ignore[no-redef]
+        """Download a YouTube video or playlist"""
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        url = (payload.get("url") or "").strip()
+        is_playlist = payload.get("is_playlist", False)
+        quality = payload.get("quality", "best")
+        
+        if not url:
+            return jsonify({"ok": False, "error": "url required"}), 400
+        
+        try:
+            # Build quality format string
+            if quality == 'best':
+                format_str = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+            elif quality == 'audio':
+                format_str = 'bestaudio[ext=m4a]/bestaudio/best'
+            else:
+                # For specific resolutions like 720, 1080, etc.
+                format_str = f'bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<={quality}][ext=mp4]/best'
+            
+            # Determine download location
+            if is_playlist:
+                # Extract playlist info first
+                info_result = subprocess.run(
+                    ["yt-dlp", "--flat-playlist", "--dump-json", "--no-warnings", url],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=30
+                )
+                
+                # Get playlist title from first entry
+                first_line = info_result.stdout.strip().split('\n')[0] if info_result.stdout.strip() else None
+                playlist_title = "playlist"
+                if first_line:
+                    try:
+                        first_data = json.loads(first_line)
+                        playlist_title = first_data.get("playlist_title") or first_data.get("playlist") or "playlist"
+                    except:
+                        pass
+                
+                # Sanitize playlist name
+                playlist_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in playlist_title)
+                playlist_dir = videos_dir / playlist_name
+                playlist_dir.mkdir(parents=True, exist_ok=True)
+                output_template = str(playlist_dir / "%(title)s.%(ext)s")
+            else:
+                output_template = str(videos_dir / "%(title)s.%(ext)s")
+            
+            # Download video(s)
+            download_result = subprocess.run(
+                [
+                    "yt-dlp",
+                    "-f", format_str,
+                    "--merge-output-format", "mp4",
+                    "-o", output_template,
+                    "--no-warnings",
+                    url
+                ],
+                capture_output=True,
+                text=True,
+                timeout=600  # 10 minutes max
+            )
+            
+            if download_result.returncode != 0:
+                return jsonify({"ok": False, "error": f"Download failed: {download_result.stderr}"}), 500
+            
+            return jsonify({
+                "ok": True,
+                "message": "Download complete",
+                "is_playlist": is_playlist,
+                "location": str(playlist_dir if is_playlist else videos_dir)
+            })
+            
+        except subprocess.TimeoutExpired:
+            return jsonify({"ok": False, "error": "Download timeout"}), 408
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @app.get("/api/videos/library")
+    def get_video_library():  # type: ignore[no-redef]
+        """List all downloaded videos and playlists"""
+        try:
+            library = {
+                "videos": [],
+                "playlists": []
+            }
+            
+            # Scan videos directory
+            for item in videos_dir.iterdir():
+                if item.is_file() and item.suffix.lower() in {".mp4", ".mkv", ".webm", ".avi"}:
+                    library["videos"].append({
+                        "name": item.stem,
+                        "filename": item.name,
+                        "size": item.stat().st_size,
+                        "path": str(item.relative_to(videos_dir))
+                    })
+                elif item.is_dir():
+                    # It's a playlist directory
+                    videos_in_playlist = []
+                    for video in item.iterdir():
+                        if video.is_file() and video.suffix.lower() in {".mp4", ".mkv", ".webm", ".avi"}:
+                            videos_in_playlist.append({
+                                "name": video.stem,
+                                "filename": video.name,
+                                "size": video.stat().st_size
+                            })
+                    
+                    if videos_in_playlist:
+                        library["playlists"].append({
+                            "name": item.name,
+                            "video_count": len(videos_in_playlist),
+                            "videos": videos_in_playlist
+                        })
+            
+            # Sort for consistent ordering
+            library["videos"].sort(key=lambda x: x["name"].lower())
+            library["playlists"].sort(key=lambda x: x["name"].lower())
+            
+            return jsonify({"ok": True, "library": library})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @app.delete("/api/videos/delete")
+    def delete_video():  # type: ignore[no-redef]
+        """Delete a video or playlist"""
+        payload: Dict[str, Any] = request.get_json(force=True, silent=True) or {}
+        path = (payload.get("path") or "").strip()
+        is_playlist = payload.get("is_playlist", False)
+        
+        if not path:
+            return jsonify({"ok": False, "error": "path required"}), 400
+        
+        try:
+            target = videos_dir / path
+            
+            # Security check: ensure path is within videos_dir
+            if not str(target.resolve()).startswith(str(videos_dir.resolve())):
+                return jsonify({"ok": False, "error": "Invalid path"}), 400
+            
+            if is_playlist:
+                if target.is_dir():
+                    import shutil
+                    shutil.rmtree(target)
+                    return jsonify({"ok": True, "message": "Playlist deleted"})
+                else:
+                    return jsonify({"ok": False, "error": "Playlist not found"}), 404
+            else:
+                if target.is_file():
+                    target.unlink()
+                    return jsonify({"ok": True, "message": "Video deleted"})
+                else:
+                    return jsonify({"ok": False, "error": "Video not found"}), 404
+                    
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @app.get("/data/videos/<path:filename>")
+    def serve_video(filename):  # type: ignore[no-redef]
+        """Serve video files for playback"""
+        try:
+            # Security: ensure path is within videos_dir
+            video_path = videos_dir / filename
+            if not str(video_path.resolve()).startswith(str(videos_dir.resolve())):
+                abort(403)
+            
+            if not video_path.exists():
+                abort(404)
+            
+            # Get the directory and filename
+            directory = video_path.parent
+            file_name = video_path.name
+            
+            return send_from_directory(directory, file_name)
+        except Exception as e:
+            abort(404)
 
     return app
 

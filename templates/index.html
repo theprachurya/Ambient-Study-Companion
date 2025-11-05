@@ -7,9 +7,10 @@
     <a class="btn" href="#" data-nav="sounds">Ambient Sounds</a>
     <a class="btn ghost" href="#" data-nav="timers">Timers</a>
     <a class="btn" href="#" data-nav="reminders">Reminders</a>
-    <a class="btn ghost" href="#" data-nav="journal">Journal</a>
-    <a class="btn" href="#" data-nav="stats">Stats</a>
-    <a class="btn ghost" href="#" data-nav="settings">Settings</a>
+    <a class="btn ghost" href="#" data-nav="videos">Videos</a>
+    <a class="btn" href="#" data-nav="journal">Journal</a>
+    <a class="btn ghost" href="#" data-nav="stats">Stats</a>
+    <a class="btn" href="#" data-nav="settings">Settings</a>
   </div>
 
   <section class="grid cols-3" style="margin-top: 18px;">
@@ -54,52 +55,58 @@
     <button class="btn ghost" data-back>Back</button>
     <h2 style="margin:0;">Focus Timers</h2>
   </div>
-  <p class="muted">Choose between Pomodoro or Stopwatch for tracking your focus sessions.</p>
+  <p class="muted">Work sessions with breaks. Clock chimes at the end of each session.</p>
   
-  <!-- Timer Mode Selector -->
-  <div class="card" style="margin-top:12px;">
-    <div style="display:flex; gap:8px; margin-bottom:12px;">
-      <button id="mode-pomodoro" class="btn" style="flex:1;">Pomodoro</button>
-      <button id="mode-stopwatch" class="btn ghost" style="flex:1;">Stopwatch</button>
-    </div>
-  </div>
-
   <!-- Pomodoro Timer -->
-  <div id="pomodoro-container" style="display:flex; gap:18px; align-items:center; flex-wrap:wrap; margin-top:10px;">
-    <div class="ring" id="pomodoro-ring" style="--p:0%; position:relative;">
-      <div style="position:absolute; inset:0; display:grid; place-items:center; font-weight:600;">
-        <span id="pomodoro-label">25:00</span>
+  <div id="pomodoro-container" style="margin-top:16px;">
+    <h3>Pomodoro Timer</h3>
+    <div style="display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap; margin-top:10px;">
+      <div class="ring" id="pomodoro-ring" style="--p:0%; position:relative;">
+        <div style="position:absolute; inset:0; display:grid; place-items:center; font-weight:600;">
+          <div style="text-align:center;">
+            <div id="pomodoro-label">25:00</div>
+            <div id="pomodoro-status" style="font-size:0.7em; margin-top:4px; opacity:0.7;">Ready</div>
+          </div>
+        </div>
       </div>
-    </div>
-    <div class="card" style="min-width:260px;">
-      <label for="pomodoro-minutes" class="section-title">Minutes</label>
-      <input id="pomodoro-minutes" type="number" min="1" value="25" style="width:100%; padding:10px; border-radius:12px; border: 1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);" />
-      <div style="height:10px;"></div>
-      <div style="display:flex; gap:8px; flex-wrap: wrap;">
-        <button id="start-pomodoro" class="btn">Start</button>
-        <button id="pause-pomodoro" class="btn ghost">Pause</button>
-        <button id="resume-pomodoro" class="btn ghost">Resume</button>
-        <button id="stop-pomodoro" class="btn ghost">Stop</button>
+      <div class="card" style="min-width:280px;">
+        <label for="pomodoro-sessions" class="section-title">Sessions</label>
+        <input id="pomodoro-sessions" type="number" min="1" max="10" value="4" style="width:100%; padding:10px; border-radius:12px; border: 1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text); margin-bottom:12px;" />
+        
+        <label for="pomodoro-work-mins" class="section-title">Work Duration (minutes)</label>
+        <input id="pomodoro-work-mins" type="number" min="1" max="60" value="25" style="width:100%; padding:10px; border-radius:12px; border: 1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text); margin-bottom:12px;" />
+        
+        <label for="pomodoro-break-mins" class="section-title">Break Duration (minutes)</label>
+        <input id="pomodoro-break-mins" type="number" min="1" max="30" value="5" style="width:100%; padding:10px; border-radius:12px; border: 1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text); margin-bottom:16px;" />
+        
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button id="start-pomodoro" class="btn">Start</button>
+          <button id="pause-pomodoro" class="btn ghost" style="display:none;">Pause</button>
+          <button id="resume-pomodoro" class="btn ghost" style="display:none;">Resume</button>
+          <button id="skip-pomodoro" class="btn ghost" style="display:none;">Skip</button>
+          <button id="stop-pomodoro" class="btn ghost" style="display:none;">Stop</button>
+        </div>
       </div>
     </div>
   </div>
 
   <!-- Stopwatch -->
-  <div id="stopwatch-container" style="display:none; gap:18px; align-items:center; flex-wrap:wrap; margin-top:10px;">
-    <div class="ring" id="stopwatch-ring" style="--p:100%; position:relative; background: conic-gradient(var(--accent) 100%, transparent 0);">
-      <div style="position:absolute; inset:0; display:grid; place-items:center; font-weight:600;">
-        <span id="stopwatch-label">00:00</span>
+  <div id="stopwatch-container" style="margin-top:32px;">
+    <h3>Stopwatch</h3>
+    <p class="muted">Track your focus time freely.</p>
+    <div style="display:flex; gap:18px; align-items:center; flex-wrap:wrap; margin-top:10px;">
+      <div class="ring" id="stopwatch-ring" style="--p:100%; position:relative; background: conic-gradient(var(--accent) 100%, transparent 0);">
+        <div style="position:absolute; inset:0; display:grid; place-items:center; font-weight:600;">
+          <span id="stopwatch-label">00:00</span>
+        </div>
       </div>
-    </div>
-    <div class="card" style="min-width:260px;">
-      <div class="section-title">Stopwatch Mode</div>
-      <p class="muted" style="font-size:0.9em;">Track unlimited focus time</p>
-      <div style="height:10px;"></div>
-      <div style="display:flex; gap:8px; flex-wrap: wrap;">
-        <button id="start-stopwatch" class="btn">Start</button>
-        <button id="pause-stopwatch" class="btn ghost">Pause</button>
-        <button id="resume-stopwatch" class="btn ghost">Resume</button>
-        <button id="stop-stopwatch" class="btn ghost">Stop</button>
+      <div class="card" style="min-width:260px;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button id="start-stopwatch" class="btn">Start</button>
+          <button id="pause-stopwatch" class="btn ghost" style="display:none;">Pause</button>
+          <button id="resume-stopwatch" class="btn ghost" style="display:none;">Resume</button>
+          <button id="stop-stopwatch" class="btn ghost" style="display:none;">Stop</button>
+        </div>
       </div>
     </div>
   </div>
@@ -117,6 +124,89 @@
     <button id="add-reminder" class="btn">Add Reminder</button>
   </div>
   <section class="grid cols-3" id="reminder-list" style="margin-top: 16px;"></section>
+</section>
+
+<section class="panel ac-hero fade-in" data-panel="videos" hidden>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <button class="btn ghost" data-back>Back</button>
+    <h2 style="margin:0;">Study Videos</h2>
+  </div>
+  <p class="muted">Search and download YouTube videos or playlists for offline study.</p>
+
+  <!-- Tab Selector -->
+  <div class="card" style="margin-top:16px;">
+    <div style="display:flex; gap:8px;">
+      <button id="videos-tab-btn" class="btn" style="flex:1;">Videos</button>
+      <button id="playlists-tab-btn" class="btn ghost" style="flex:1;">Playlists</button>
+    </div>
+  </div>
+
+  <!-- Videos Tab -->
+  <div id="videos-tab-content">
+    <!-- Search Section -->
+    <div class="card" style="margin-top:16px;">
+      <div class="section-title">Search & Download</div>
+      <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+        <input 
+          id="video-search-input" 
+          type="text" 
+          placeholder="Search for videos or paste URL..." 
+          style="flex:1; min-width:250px; padding:10px; border-radius:12px; border:1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);"
+        />
+        <button id="video-search-btn" class="btn">Search</button>
+      </div>
+      <div id="video-search-status" class="muted" style="margin-top:8px; font-size:0.9em;"></div>
+    </div>
+
+    <!-- Search Results -->
+    <div id="video-search-results" style="margin-top:16px; display:none;">
+      <div class="section-title">Results</div>
+      <div id="video-results-list" style="display:flex; flex-direction:column; gap:12px; margin-top:12px;"></div>
+    </div>
+
+    <!-- Library Section -->
+    <div class="card" style="margin-top:24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div class="section-title">Downloaded Videos</div>
+        <button class="btn ghost" id="refresh-videos-library-btn">Refresh</button>
+      </div>
+      
+      <div id="library-videos-list" style="display:flex; flex-direction:column; gap:8px;">
+        <p class="muted">No videos downloaded yet.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Playlists Tab -->
+  <div id="playlists-tab-content" style="display:none;">
+    <!-- Paste Playlist Link Section -->
+    <div class="card" style="margin-top:16px;">
+      <div class="section-title">Download Playlist</div>
+      <p class="muted" style="font-size:0.9em; margin-bottom:12px;">Paste a YouTube playlist URL to download all videos</p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <input 
+          id="playlist-url-input" 
+          type="text" 
+          placeholder="https://www.youtube.com/playlist?list=..." 
+          style="flex:1; min-width:250px; padding:10px; border-radius:12px; border:1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);"
+        />
+        <button id="playlist-download-btn" class="btn">Download Playlist</button>
+      </div>
+      <div id="playlist-download-status" class="muted" style="margin-top:8px; font-size:0.9em;"></div>
+    </div>
+
+    <!-- Downloaded Playlists Library -->
+    <div class="card" style="margin-top:24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div class="section-title">Downloaded Playlists</div>
+        <button class="btn ghost" id="refresh-playlists-library-btn">Refresh</button>
+      </div>
+      
+      <div id="library-playlists-list" style="display:flex; flex-direction:column; gap:8px;">
+        <p class="muted">No playlists downloaded yet.</p>
+      </div>
+    </div>
+  </div>
 </section>
 
 <section class="panel ac-hero fade-in" data-panel="journal" hidden>
@@ -296,9 +386,10 @@
         <tr><td><kbd>1</kbd></td><td>Go to Sounds</td></tr>
         <tr><td><kbd>2</kbd></td><td>Go to Timers</td></tr>
         <tr><td><kbd>3</kbd></td><td>Go to Reminders</td></tr>
-        <tr><td><kbd>4</kbd></td><td>Go to Journal</td></tr>
-        <tr><td><kbd>5</kbd></td><td>Go to Stats</td></tr>
-        <tr><td><kbd>6</kbd></td><td>Go to Settings</td></tr>
+        <tr><td><kbd>4</kbd></td><td>Go to Videos</td></tr>
+        <tr><td><kbd>5</kbd></td><td>Go to Journal</td></tr>
+        <tr><td><kbd>6</kbd></td><td>Go to Stats</td></tr>
+        <tr><td><kbd>7</kbd></td><td>Go to Settings</td></tr>
         <tr><td><kbd>Esc</kbd></td><td>Go Back / Home</td></tr>
       </table>
     </div>

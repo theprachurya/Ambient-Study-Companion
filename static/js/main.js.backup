@@ -890,7 +890,6 @@
 
   // Videos
   function initVideos() {
-    console.log('initVideos called, __inited:', initVideos.__inited);
     if (initVideos.__inited) return;
 
     // Tab elements
@@ -900,19 +899,21 @@
     const playlistsTabContent = document.getElementById('playlists-tab-content');
 
     // Videos tab elements
-    const searchInput = document.getElementById('video-search-input');
-    const searchBtn = document.getElementById('video-search-btn');
-    const searchStatus = document.getElementById('video-search-status');
-    const searchResultsSection = document.getElementById('video-search-results');
-    const resultsList = document.getElementById('video-results-list');
-    const refreshVideosLibraryBtn = document.getElementById('refresh-videos-library-btn');
+    const videoSearchInput = document.getElementById('video-search-input');
+    const videoSearchBtn = document.getElementById('video-search-btn');
+    const videoSearchStatus = document.getElementById('video-search-status');
+    const videoSearchResultsSection = document.getElementById('video-search-results');
+    const videoResultsList = document.getElementById('video-results-list');
+    const refreshVideosBtn = document.getElementById('refresh-videos-btn');
     const libraryVideosList = document.getElementById('library-videos-list');
 
     // Playlists tab elements
-    const playlistUrlInput = document.getElementById('playlist-url-input');
-    const playlistDownloadBtn = document.getElementById('playlist-download-btn');
-    const playlistDownloadStatus = document.getElementById('playlist-download-status');
-    const refreshPlaylistsLibraryBtn = document.getElementById('refresh-playlists-library-btn');
+    const playlistSearchInput = document.getElementById('playlist-search-input');
+    const playlistSearchBtn = document.getElementById('playlist-search-btn');
+    const playlistSearchStatus = document.getElementById('playlist-search-status');
+    const playlistSearchResultsSection = document.getElementById('playlist-search-results');
+    const playlistResultsList = document.getElementById('playlist-results-list');
+    const refreshPlaylistsBtn = document.getElementById('refresh-playlists-btn');
     const libraryPlaylistsList = document.getElementById('library-playlists-list');
 
     // Tab switching
@@ -933,43 +934,87 @@
     videosTabBtn.addEventListener('click', switchToVideos);
     playlistsTabBtn.addEventListener('click', switchToPlaylists);
 
-    // Elements
+    // Search videos (individual)
     async function searchVideos() {
-      const query = searchInput.value.trim();
+      const query = videoSearchInput.value.trim();
       if (!query) {
-        searchStatus.textContent = 'Please enter a search query';
+        videoSearchStatus.textContent = 'Please enter a search query';
         return;
       }
 
-      searchStatus.textContent = 'Searching...';
-      searchBtn.disabled = true;
+      videoSearchStatus.textContent = 'Searching...';
+      videoSearchBtn.disabled = true;
 
       try {
         const response = await fetch(`/api/videos/search?query=${encodeURIComponent(query)}`);
         const data = await response.json();
 
         if (data.ok && data.videos) {
-          displaySearchResults(data.videos);
-          searchStatus.textContent = `Found ${data.videos.length} result(s)`;
+          // Filter out playlists - only show individual videos
+          const individualVideos = data.videos.filter(v => !v.url.includes('/playlist?'));
+          displayVideoResults(individualVideos);
+          videoSearchStatus.textContent = `Found ${individualVideos.length} video(s)`;
         } else {
-          searchStatus.textContent = data.error || 'Search failed';
-          searchResultsSection.style.display = 'none';
+          videoSearchStatus.textContent = data.error || 'Search failed';
+          videoSearchResultsSection.style.display = 'none';
         }
       } catch (error) {
-        searchStatus.textContent = 'Search error: ' + error.message;
-        searchResultsSection.style.display = 'none';
+        videoSearchStatus.textContent = 'Search error: ' + error.message;
+        videoSearchResultsSection.style.display = 'none';
       } finally {
-        searchBtn.disabled = false;
+        videoSearchBtn.disabled = false;
       }
     }
 
-    // Display search results
-    function displaySearchResults(videos) {
-      resultsList.innerHTML = '';
-      searchResultsSection.style.display = 'block';
+    // Search playlists
+    async function searchPlaylists() {
+      const query = playlistSearchInput.value.trim();
+      if (!query) {
+        playlistSearchStatus.textContent = 'Please enter a search query or playlist URL';
+        return;
+      }
+
+      playlistSearchStatus.textContent = 'Searching...';
+      playlistSearchBtn.disabled = true;
+
+      try {
+        // Check if it's a direct playlist URL
+        const isPlaylistUrl = query.includes('playlist?') || query.includes('&list=');
+        
+        if (isPlaylistUrl) {
+          // Direct playlist download
+          displayPlaylistUrl(query);
+          playlistSearchStatus.textContent = 'Playlist URL detected - ready to download';
+        } else {
+          // Search for playlists
+          const searchQuery = `${query} playlist`;
+          const response = await fetch(`/api/videos/search?query=${encodeURIComponent(searchQuery)}`);
+          const data = await response.json();
+
+          if (data.ok && data.videos) {
+            // Filter for playlists or show all as potential playlists
+            displayPlaylistResults(data.videos);
+            playlistSearchStatus.textContent = `Found ${data.videos.length} result(s)`;
+          } else {
+            playlistSearchStatus.textContent = data.error || 'Search failed';
+            playlistSearchResultsSection.style.display = 'none';
+          }
+        }
+      } catch (error) {
+        playlistSearchStatus.textContent = 'Search error: ' + error.message;
+        playlistSearchResultsSection.style.display = 'none';
+      } finally {
+        playlistSearchBtn.disabled = false;
+      }
+    }
+
+    // Display video results
+    function displayVideoResults(videos) {
+      videoResultsList.innerHTML = '';
+      videoSearchResultsSection.style.display = 'block';
 
       if (videos.length === 0) {
-        resultsList.innerHTML = '<p class="muted">No results found.</p>';
+        videoResultsList.innerHTML = '<p class="muted">No individual videos found. Try the Playlists tab for playlist results.</p>';
         return;
       }
 
@@ -989,225 +1034,88 @@
             <div class="muted" style="font-size:0.85em; margin-bottom:4px;">${video.channel || 'Unknown'} · ${duration}</div>
             ${video.description ? `<div class="muted" style="font-size:0.8em;">${video.description}</div>` : ''}
           </div>
-          <div style="display:flex; gap:4px; flex-direction:column;">
-            <button class="btn" data-url="${video.url}" data-single>Download</button>
-            ${video.url.includes('playlist?list=') || video.url.includes('&list=') ? '<button class="btn ghost" data-url="' + video.url + '" data-playlist>As Playlist</button>' : ''}
-          </div>
+          <button class="btn" data-download-video="${video.url}" data-title="${video.title}">Download</button>
         `;
 
-        card.querySelector('[data-single]').addEventListener('click', () => showQualitySelection(video.url, false, video.title, event.target));
-        const playlistBtn = card.querySelector('[data-playlist]');
-        if (playlistBtn) {
-          playlistBtn.addEventListener('click', () => showQualitySelection(video.url, true, video.title, event.target));
-        }
+        card.querySelector('[data-download-video]').addEventListener('click', (e) => {
+          showQualitySelection(video.url, false, video.title, e.target);
+        });
 
-        resultsList.appendChild(card);
+        videoResultsList.appendChild(card);
       });
     }
 
-    // Download playlist from URL
-    async function downloadPlaylist() {
-      const url = playlistUrlInput.value.trim();
-      if (!url) {
-        playlistDownloadStatus.textContent = 'Please paste a playlist URL';
+    // Display playlist results
+    function displayPlaylistResults(playlists) {
+      playlistResultsList.innerHTML = '';
+      playlistSearchResultsSection.style.display = 'block';
+
+      if (playlists.length === 0) {
+        playlistResultsList.innerHTML = '<p class="muted">No results found.</p>';
         return;
       }
 
-      // Validate it's a playlist URL
-      if (!url.includes('playlist?list=') && !url.includes('&list=')) {
-        playlistDownloadStatus.textContent = 'Invalid playlist URL. Please paste a valid YouTube playlist link.';
+      // Filter to only show playlists (check if URL contains playlist indicators)
+      const actualPlaylists = playlists.filter(item => 
+        item.url.includes('playlist?list=') || item.url.includes('&list=')
+      );
+
+      if (actualPlaylists.length === 0) {
+        playlistResultsList.innerHTML = '<p class="muted">No playlists found. Try entering a direct playlist URL or different search terms.</p>';
         return;
       }
 
-      // Show quality selection
-      showPlaylistQualitySelection(url);
+      actualPlaylists.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.style.display = 'flex';
+        card.style.gap = '12px';
+        card.style.alignItems = 'flex-start';
+
+        const duration = item.duration ? `${Math.floor(item.duration / 60)}:${String(item.duration % 60).padStart(2, '0')}` : 'N/A';
+        
+        card.innerHTML = `
+          ${item.thumbnail ? `<img src="${item.thumbnail}" alt="thumbnail" style="width:120px; height:90px; object-fit:cover; border-radius:4px; flex-shrink:0;">` : ''}
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:600; margin-bottom:4px; overflow:hidden; text-overflow:ellipsis;">${item.title || 'Untitled'}</div>
+            <div class="muted" style="font-size:0.85em; margin-bottom:4px;">${item.channel || 'Unknown'} · ${duration}</div>
+            ${item.description ? `<div class="muted" style="font-size:0.8em;">${item.description}</div>` : ''}
+          </div>
+          <button class="btn" data-download-playlist="${item.url}" data-title="${item.title}">Download Playlist</button>
+        `;
+
+        card.querySelector('[data-download-playlist]').addEventListener('click', (e) => {
+          showQualitySelection(item.url, true, item.title, e.target);
+        });
+
+        playlistResultsList.appendChild(card);
+      });
     }
 
-    // Show quality selection for playlist
-    function showPlaylistQualitySelection(url) {
-      const qualities = [
-        { label: 'Best Quality', value: 'best' },
-        { label: '1080p', value: '1080' },
-        { label: '720p', value: '720' },
-        { label: '480p', value: '480' },
-        { label: '360p', value: '360' },
-        { label: 'Audio Only (Best)', value: 'audio' }
-      ];
+    // Display direct playlist URL
+    function displayPlaylistUrl(url) {
+      playlistResultsList.innerHTML = '';
+      playlistSearchResultsSection.style.display = 'block';
 
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); display:flex; align-items:center; justify-content:center; z-index:1000;';
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.style.display = 'flex';
+      card.style.gap = '12px';
+      card.style.alignItems = 'center';
       
-      const modal = document.createElement('div');
-      modal.className = 'card';
-      modal.style.cssText = 'max-width:400px; width:90%; padding:20px;';
-      
-      modal.innerHTML = `
-        <h3 style="margin-top:0;">Select Quality for Playlist</h3>
-        <div style="display:flex; flex-direction:column; gap:8px; margin:16px 0;">
-          ${qualities.map(q => `
-            <button class="btn ghost" data-quality="${q.value}" style="justify-content:flex-start;">
-              ${q.label}
-            </button>
-          `).join('')}
+      card.innerHTML = `
+        <div style="flex:1; min-width:0;">
+          <div style="font-weight:600; margin-bottom:4px;">Playlist URL</div>
+          <div class="muted" style="font-size:0.85em; overflow:hidden; text-overflow:ellipsis;">${url}</div>
         </div>
-        <button class="btn ghost" data-cancel style="width:100%; margin-top:8px;">Cancel</button>
+        <button class="btn" data-download-playlist="${url}" data-title="playlist">Download Playlist</button>
       `;
 
-      modal.querySelectorAll('[data-quality]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const quality = btn.dataset.quality;
-          overlay.remove();
-          executePlaylistDownload(url, quality);
-        });
+      card.querySelector('[data-download-playlist]').addEventListener('click', (e) => {
+        downloadVideo(url, true, 'playlist', e.target);
       });
 
-      modal.querySelector('[data-cancel]').addEventListener('click', () => {
-        overlay.remove();
-      });
-
-      overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) overlay.remove();
-      });
-
-      overlay.appendChild(modal);
-      document.body.appendChild(overlay);
-    }
-
-    // Execute playlist download
-    async function executePlaylistDownload(url, quality) {
-      playlistDownloadStatus.textContent = 'Downloading playlist...';
-      playlistDownloadBtn.disabled = true;
-
-      try {
-        const response = await fetch('/api/videos/download', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url, is_playlist: true, quality })
-        });
-
-        const data = await response.json();
-
-        if (data.ok) {
-          playlistDownloadStatus.textContent = '✓ Playlist downloaded successfully!';
-          playlistUrlInput.value = '';
-          log('video', 'playlist_download_complete', url);
-          setTimeout(() => {
-            loadPlaylistsLibrary();
-            playlistDownloadStatus.textContent = '';
-          }, 2000);
-        } else {
-          playlistDownloadStatus.textContent = '✗ Download failed: ' + (data.error || 'Unknown error');
-        }
-      } catch (error) {
-        playlistDownloadStatus.textContent = '✗ Error: ' + error.message;
-      } finally {
-        playlistDownloadBtn.disabled = false;
-      }
-    }
-
-    // Load videos library
-    async function loadVideosLibrary() {
-      try {
-        const response = await fetch('/api/videos/library');
-        const data = await response.json();
-
-        if (data.ok && data.library) {
-          displayVideosLibrary(data.library.videos);
-        }
-      } catch (error) {
-        console.error('Failed to load videos library:', error);
-      }
-    }
-
-    // Load playlists library
-    async function loadPlaylistsLibrary() {
-      try {
-        const response = await fetch('/api/videos/library');
-        const data = await response.json();
-
-        if (data.ok && data.library) {
-          displayPlaylistsLibrary(data.library.playlists);
-        }
-      } catch (error) {
-        console.error('Failed to load playlists library:', error);
-      }
-    }
-
-    // Display videos library
-    function displayVideosLibrary(videos) {
-      if (videos && videos.length > 0) {
-        libraryVideosList.innerHTML = '';
-        videos.forEach(video => {
-          const item = document.createElement('div');
-          item.className = 'card';
-          item.style.display = 'flex';
-          item.style.justifyContent = 'space-between';
-          item.style.alignItems = 'center';
-          item.style.gap = '8px';
-
-          const sizeInMB = (video.size / (1024 * 1024)).toFixed(1);
-          
-          item.innerHTML = `
-            <div style="flex:1; min-width:0;">
-              <div style="font-weight:500; overflow:hidden; text-overflow:ellipsis;">${video.name}</div>
-              <div class="muted" style="font-size:0.85em;">${sizeInMB} MB</div>
-            </div>
-            <div style="display:flex; gap:4px;">
-              <button class="btn" data-play-video="${video.path}">Play</button>
-              <button class="btn ghost" data-delete-video="${video.path}">Delete</button>
-            </div>
-          `;
-
-          item.querySelector('[data-play-video]').addEventListener('click', () => playVideo(video.path, video.name));
-          item.querySelector('[data-delete-video]').addEventListener('click', () => deleteItem(video.path, false));
-          libraryVideosList.appendChild(item);
-        });
-      } else {
-        libraryVideosList.innerHTML = '<p class="muted">No videos downloaded yet.</p>';
-      }
-    }
-
-    // Display playlists library
-    function displayPlaylistsLibrary(playlists) {
-      if (playlists && playlists.length > 0) {
-        libraryPlaylistsList.innerHTML = '';
-        playlists.forEach(playlist => {
-          const item = document.createElement('div');
-          item.className = 'card';
-          
-          item.innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-              <div style="font-weight:600;">${playlist.name}</div>
-              <button class="btn ghost" data-delete-playlist="${playlist.name}">Delete Playlist</button>
-            </div>
-            <div class="muted" style="font-size:0.85em; margin-bottom:8px;">${playlist.video_count} video(s)</div>
-            <div style="display:flex; flex-direction:column; gap:4px; padding-left:12px;">
-              ${playlist.videos.map(v => {
-                const sizeInMB = (v.size / (1024 * 1024)).toFixed(1);
-                return `
-                  <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0;">
-                    <div class="muted" style="font-size:0.8em; flex:1;">• ${v.name} (${sizeInMB} MB)</div>
-                    <button class="btn ghost" style="font-size:0.75em; padding:4px 8px;" data-play-playlist-video="${playlist.name}/${v.filename}">Play</button>
-                  </div>
-                `;
-              }).join('')}
-            </div>
-          `;
-
-          item.querySelector('[data-delete-playlist]').addEventListener('click', () => deleteItem(playlist.name, true));
-          
-          // Add play buttons for each video in playlist
-          item.querySelectorAll('[data-play-playlist-video]').forEach(btn => {
-            const videoPath = btn.dataset.playPlaylistVideo;
-            const videoName = videoPath.split('/').pop();
-            btn.addEventListener('click', () => playVideo(videoPath, videoName));
-          });
-
-          libraryPlaylistsList.appendChild(item);
-        });
-      } else {
-        libraryPlaylistsList.innerHTML = '<p class="muted">No playlists downloaded yet.</p>';
-      }
+      playlistResultsList.appendChild(card);
     }
 
     // Show quality selection dialog
@@ -1221,6 +1129,7 @@
         { label: 'Audio Only (Best)', value: 'audio' }
       ];
 
+      // Create modal overlay
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); display:flex; align-items:center; justify-content:center; z-index:1000;';
       
@@ -1278,7 +1187,9 @@
         if (data.ok) {
           buttonElement.textContent = '✓ Downloaded';
           log('video', 'download_complete', title || url);
-          setTimeout(() => loadLibrary(), 1000);
+          setTimeout(() => {
+            loadLibrary();
+          }, 1000);
         } else {
           buttonElement.textContent = '✗ Failed';
           alert('Download failed: ' + (data.error || 'Unknown error'));
@@ -1296,14 +1207,11 @@
 
     // Load library
     async function loadLibrary() {
-      console.log('Loading video library...');
       try {
         const response = await fetch('/api/videos/library');
         const data = await response.json();
-        console.log('Library data received:', data);
 
         if (data.ok && data.library) {
-          console.log('Videos:', data.library.videos.length, 'Playlists:', data.library.playlists.length);
           displayLibrary(data.library);
         }
       } catch (error) {
@@ -1313,7 +1221,6 @@
 
     // Display library
     function displayLibrary(library) {
-      console.log('displayLibrary called with:', library);
       // Individual videos
       if (library.videos && library.videos.length > 0) {
         libraryVideosList.innerHTML = '';
@@ -1332,13 +1239,9 @@
               <div style="font-weight:500; overflow:hidden; text-overflow:ellipsis;">${video.name}</div>
               <div class="muted" style="font-size:0.85em;">${sizeInMB} MB</div>
             </div>
-            <div style="display:flex; gap:4px;">
-              <button class="btn" data-play-video="${video.path}">Play</button>
-              <button class="btn ghost" data-delete-video="${video.path}">Delete</button>
-            </div>
+            <button class="btn ghost" data-delete-video="${video.path}">Delete</button>
           `;
 
-          item.querySelector('[data-play-video]').addEventListener('click', () => playVideo(video.path, video.name));
           item.querySelector('[data-delete-video]').addEventListener('click', () => deleteItem(video.path, false));
           libraryVideosList.appendChild(item);
         });
@@ -1362,92 +1265,17 @@
             <div style="display:flex; flex-direction:column; gap:4px; padding-left:12px;">
               ${playlist.videos.map(v => {
                 const sizeInMB = (v.size / (1024 * 1024)).toFixed(1);
-                return `
-                  <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0;">
-                    <div class="muted" style="font-size:0.8em; flex:1;">• ${v.name} (${sizeInMB} MB)</div>
-                    <button class="btn ghost" style="font-size:0.75em; padding:4px 8px;" data-play-playlist-video="${playlist.name}/${v.filename}">Play</button>
-                  </div>
-                `;
+                return `<div class="muted" style="font-size:0.8em;">• ${v.name} (${sizeInMB} MB)</div>`;
               }).join('')}
             </div>
           `;
 
           item.querySelector('[data-delete-playlist]').addEventListener('click', () => deleteItem(playlist.name, true));
-          
-          // Add play buttons for each video in playlist
-          item.querySelectorAll('[data-play-playlist-video]').forEach(btn => {
-            const videoPath = btn.dataset.playPlaylistVideo;
-            const videoName = videoPath.split('/').pop();
-            btn.addEventListener('click', () => playVideo(videoPath, videoName));
-          });
-
           libraryPlaylistsList.appendChild(item);
         });
       } else {
         libraryPlaylistsList.innerHTML = '<p class="muted">No playlists downloaded yet.</p>';
       }
-    }
-
-    // Play video in modal
-    function playVideo(videoPath, videoName) {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.95); display:flex; align-items:center; justify-content:center; z-index:1000; padding:20px;';
-      
-      const container = document.createElement('div');
-      container.style.cssText = 'max-width:1200px; width:100%; display:flex; flex-direction:column; gap:12px;';
-      
-      container.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; color:white;">
-          <h3 style="margin:0;">${videoName}</h3>
-          <button class="btn ghost" data-close-player style="color:white;">Close ✕</button>
-        </div>
-        <video 
-          controls 
-          autoplay 
-          style="width:100%; max-height:80vh; background:black; border-radius:8px;"
-          src="/data/videos/${encodeURIComponent(videoPath)}"
-        >
-          Your browser does not support video playback.
-        </video>
-      `;
-
-      const video = container.querySelector('video');
-      const closeBtn = container.querySelector('[data-close-player]');
-      
-      closeBtn.addEventListener('click', () => {
-        video.pause();
-        overlay.remove();
-      });
-
-      overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) {
-          video.pause();
-          overlay.remove();
-        }
-      });
-
-      // Keyboard shortcuts
-      const handleKeyPress = (e) => {
-        if (e.key === 'Escape') {
-          video.pause();
-          overlay.remove();
-          document.removeEventListener('keydown', handleKeyPress);
-        } else if (e.key === ' ' || e.key === 'k') {
-          e.preventDefault();
-          if (video.paused) video.play();
-          else video.pause();
-        } else if (e.key === 'ArrowLeft') {
-          video.currentTime = Math.max(0, video.currentTime - 5);
-        } else if (e.key === 'ArrowRight') {
-          video.currentTime = Math.min(video.duration, video.currentTime + 5);
-        } else if (e.key === 'f') {
-          if (video.requestFullscreen) video.requestFullscreen();
-        }
-      };
-      document.addEventListener('keydown', handleKeyPress);
-
-      overlay.appendChild(container);
-      document.body.appendChild(overlay);
     }
 
     // Delete video or playlist
@@ -1464,11 +1292,7 @@
         const data = await response.json();
 
         if (data.ok) {
-          if (isPlaylist) {
-            loadPlaylistsLibrary();
-          } else {
-            loadVideosLibrary();
-          }
+          loadLibrary();
         } else {
           alert('Delete failed: ' + (data.error || 'Unknown error'));
         }
@@ -1482,18 +1306,11 @@
     searchInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') searchVideos();
     });
-    
-    playlistDownloadBtn.addEventListener('click', downloadPlaylist);
-    playlistUrlInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') downloadPlaylist();
-    });
-    
-    refreshVideosLibraryBtn.addEventListener('click', loadVideosLibrary);
-    refreshPlaylistsLibraryBtn.addEventListener('click', loadPlaylistsLibrary);
+
+    refreshLibraryBtn.addEventListener('click', loadLibrary);
 
     // Initial load
-    loadVideosLibrary();
-    loadPlaylistsLibrary();
+    loadLibrary();
     initVideos.__inited = true;
   }
 

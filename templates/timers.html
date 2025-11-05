@@ -2,18 +2,46 @@
 {% block content %}
 <section id="timers-page" class="panel ac-hero fade-in">
   <h2>Pomodoro Timer</h2>
-  <p class="muted">Gentle progress with a soft ring. Receive a calm cue on finish.</p>
-  <div style="display:flex; gap:18px; align-items:center; flex-wrap:wrap; margin-top:10px;">
+  <p class="muted">Work sessions with breaks. Clock chimes at the end of each session.</p>
+  <div style="display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap; margin-top:10px;">
     <div class="ring" id="pomodoro-ring" style="--p:0%; position:relative;">
-      <div style="position:absolute; inset:0; display:grid; place-items:center; font-weight:600;">
+      <div style="position:absolute; inset:0; display:grid; place-items:center; font-weight:600; flex-direction:column;">
         <span id="pomodoro-label">25:00</span>
+        <span id="pomodoro-status" style="font-size:0.75em; margin-top:4px; color:var(--muted);">Ready</span>
+      </div>
+    </div>
+    <div class="card" style="min-width:280px;">
+      <label for="pomodoro-sessions" class="section-title">Sessions</label>
+      <input id="pomodoro-sessions" type="number" min="1" max="10" value="4" style="width:100%; padding:10px; border-radius:12px; border: 1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text); margin-bottom:12px;" />
+      
+      <label for="pomodoro-work-mins" class="section-title">Work Duration (minutes)</label>
+      <input id="pomodoro-work-mins" type="number" min="1" max="60" value="25" style="width:100%; padding:10px; border-radius:12px; border: 1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text); margin-bottom:12px;" />
+      
+      <label for="pomodoro-break-mins" class="section-title">Break Duration (minutes)</label>
+      <input id="pomodoro-break-mins" type="number" min="1" max="30" value="5" style="width:100%; padding:10px; border-radius:12px; border: 1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text); margin-bottom:16px;" />
+      
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button id="start-pomodoro" class="btn">Start</button>
+        <button id="pause-pomodoro" class="btn ghost" style="display:none;">Pause</button>
+        <button id="resume-pomodoro" class="btn ghost" style="display:none;">Resume</button>
+        <button id="stop-pomodoro" class="btn ghost" style="display:none;">Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <h2 style="margin-top:48px;">Stopwatch</h2>
+  <p class="muted">Track your focus time freely.</p>
+  <div style="display:flex; gap:18px; align-items:center; flex-wrap:wrap; margin-top:10px;">
+    <div class="ring" id="stopwatch-ring" style="--p:0%; position:relative;">
+      <div style="position:absolute; inset:0; display:grid; place-items:center; font-weight:600;">
+        <span id="stopwatch-label">00:00</span>
       </div>
     </div>
     <div class="card" style="min-width:260px;">
-      <label for="pomodoro-minutes" class="section-title">Minutes</label>
-      <input id="pomodoro-minutes" type="number" min="1" value="25" style="width:100%; padding:10px; border-radius:12px; border: 1px solid rgba(0,0,0,0.1); background: var(--bg); color: var(--text);" />
-      <div style="height:10px;"></div>
-      <button id="start-pomodoro" class="btn">Start</button>
+      <button id="start-stopwatch" class="btn">Start</button>
+      <button id="pause-stopwatch" class="btn ghost" style="display:none; margin-top:8px;">Pause</button>
+      <button id="resume-stopwatch" class="btn ghost" style="display:none; margin-top:8px;">Resume</button>
+      <button id="stop-stopwatch" class="btn ghost" style="display:none; margin-top:8px;">Stop</button>
     </div>
   </div>
 </section>
