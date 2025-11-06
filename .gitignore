@@ -3,9 +3,3 @@ __pycache__/
 venv/
 data/ac.db
 data/logs.csv
-data/videos/
-data/uploads/
-!data/sounds/
-*.mp3
-*.m4a
-!data/sounds/*.m4a
